@@ -62,18 +62,27 @@ function fmtShortDate(s) {
   return parseDate(s).toLocaleDateString('es', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
-let toastTimer;
-function toast(msg) {
+let toastTimer, toastAction = null;
+// action opcional: { label, fn } → muestra un botón (ej. "Deshacer")
+function toast(msg, action) {
   const t = $('#toast');
-  t.textContent = msg; t.hidden = false;
+  toastAction = action || null;
+  t.innerHTML = `<span>${esc(msg)}</span>${action ? `<button data-action="toast-act">${esc(action.label)}</button>` : ''}`;
+  t.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (t.hidden = true), 2200);
+  toastTimer = setTimeout(() => { t.hidden = true; toastAction = null; }, action ? 4500 : 2200);
 }
 
 // ---------- Generador de rutinas ----------
+// Compuestos del pool; en rutinas de gym (sin tag) prefiere los que llevan carga antes que los de calistenia
+function compoundsOf(pool, tag) {
+  const comp = pool.filter((e) => e.compound);
+  const gym = comp.filter((e) => !e.tags?.includes('cali'));
+  return shuffle(!tag && gym.length ? gym : comp);
+}
 function pickFor(muscle, n, exclude, tag) {
   const pool = EXERCISES.filter((e) => e.muscle === muscle && !exclude.has(e.id) && (!tag || e.tags?.includes(tag)));
-  const compounds = shuffle(pool.filter((e) => e.compound));
+  const compounds = compoundsOf(pool, tag);
   const out = [];
   if (compounds.length) out.push(compounds[0]); // el primero de cada grupo, multiarticular
   for (const e of shuffle(pool)) {
@@ -89,10 +98,104 @@ function generate(routineKey) {
   return r.slots.flatMap(([m, n, tag]) => pickFor(m, n, used, tag)).map((e) => e.id);
 }
 
-function newWorkoutExercise(ex) {
+// Tipos que se pueden combinar (todos menos Libre y la propia Combinación)
+const COMBINABLE = Object.keys(ROUTINES).filter((k) => !ROUTINES[k].combo && k !== 'free');
+const isPlyo = (e) => e.muscle.startsWith('plyo');
+// Orden de la sesión: pliometría (fresco) → compuestos → aislamiento → core
+const orderRank = (e) => (isPlyo(e) ? 0 : e.muscle === 'core' ? 3 : e.compound ? 1 : 2);
+
+// Combinación: reparte un presupuesto de ejercicios entre los tipos elegidos
+function generateCombo(types) {
+  const k = types.length;
+  const total = COMBO.exercises[k];
+  // cuota por tipo: al menos 2; el resto va a los tipos con rutinas más grandes
+  const size = (t) => ROUTINES[t].slots.reduce((n, s) => n + s[1], 0);
+  const quota = Object.fromEntries(types.map((t) => [t, 2]));
+  let left = total - 2 * k;
+  const bySize = [...types].sort((a, b) => size(b) - size(a));
+  for (let i = 0; left > 0; i++, left--) quota[bySize[i % k]]++;
+
+  // de cada tipo, los músculos en ronda (pecho, hombro, tríceps, pecho…) para cubrir variedad primero
+  const used = new Set(), muscleUses = {}, picked = [];
+  for (const t of types) {
+    const queue = [];
+    const slots = ROUTINES[t].slots.map(([m, n, tag]) => ({ m, n, tag }));
+    for (let round = 0; slots.some((s) => s.n > round); round++) {
+      slots.filter((s) => s.n > round).forEach((s) => queue.push(s));
+    }
+    // primero los músculos que otro tipo todavía no cubrió
+    const fresh = queue.filter((s) => !muscleUses[s.m]);
+    const ordered = [...fresh, ...queue.filter((s) => !fresh.includes(s))];
+    let got = 0;
+    for (const s of ordered) {
+      if (got >= quota[t]) break;
+      const first = !muscleUses[s.m];
+      const pool = EXERCISES.filter((e) => e.muscle === s.m && !used.has(e.id) && (!s.tag || e.tags?.includes(s.tag)));
+      const comp = compoundsOf(pool, s.tag);
+      const ex = first && comp.length ? comp[0] : shuffle(pool)[0];
+      if (!ex) continue;
+      used.add(ex.id); muscleUses[s.m] = (muscleUses[s.m] || 0) + 1;
+      picked.push(ex); got++;
+    }
+  }
+
+  // ordenar y recortar series hasta el presupuesto (primero los ejercicios de aislamiento)
+  picked.sort((a, b) => orderRank(a) - orderRank(b));
+  const sets = Object.fromEntries(picked.map((e) => [e.id, e.sets]));
+  const sum = () => Object.values(sets).reduce((a, b) => a + b, 0);
+  const trimOrder = [...picked].sort((a, b) => orderRank(b) - orderRank(a));
+  for (const min of [3, 2]) {
+    for (const e of trimOrder) {
+      while (sum() > COMBO.sets[k] && sets[e.id] > min) sets[e.id]--;
+    }
+  }
+  return { ids: picked.map((e) => e.id), sets };
+}
+
+// Duración estimada (min): trabajo + descanso por serie, más el calentamiento
+function estimateMinutes(ids, setsMap = {}) {
+  const restMin = (state.settings.rest || 90) / 60;
+  const work = ids.reduce((m, id) => {
+    const e = exById(id);
+    const n = setsMap[id] ?? e.sets;
+    const perSet = isPlyo(e) ? 0.5 + restMin * 0.8 : (e.compound ? 0.9 : 0.7) + restMin;
+    return m + n * perSet;
+  }, 0);
+  return Math.round((work + 10) / 5) * 5; // ~10 min de calentamiento, redondeado a 5
+}
+
+// ---------- Calentamiento ----------
+const round25 = (w) => Math.max(2.5, Math.round(w / 2.5) * 2.5);
+function buildWarmup(types, exercises) {
+  // movilidad/activación: ronda entre los planes de cada tipo, sin repetir
+  const plans = types.map((t) => WARMUP_PLANS[t] || []);
+  const ids = [];
+  for (let i = 0; ids.length < WARMUP_MAX_STEPS && plans.some((p) => p[i]); i++) {
+    for (const p of plans) if (p[i] && !ids.includes(p[i]) && ids.length < WARMUP_MAX_STEPS) ids.push(p[i]);
+  }
+  const steps = ['cardio', ...ids].map((id) => ({ id, ...WARMUP_STEPS[id], done: false }));
+
+  // series de aproximación para el primer ejercicio pesado con carga externa
+  const heavy = exercises.map((e) => exById(e.exId)).find((e) => e && e.compound && !isPlyo(e) && !e.tags?.includes('cali'));
+  if (heavy) {
+    const last = lastFor(heavy.id);
+    const top = last ? Math.max(...last.map((s) => num(s.w))) : 0;
+    steps.push({
+      id: 'ramp', ramp: heavy.id, done: false,
+      name: `Series de aproximación · ${heavy.name}`,
+      reps: top
+        ? `${round25(top * 0.5)} kg × 8 · ${round25(top * 0.7)} kg × 5 · ${round25(top * 0.85)} kg × 3`
+        : 'Barra o peso liviano × 10 · peso moderado × 5 · casi el de trabajo × 3',
+      tip: top ? `Basado en tus ${top} kg de la última vez. Descansá ~1 min entre cada una` : 'Descansá ~1 min entre cada una. No llegues al fallo',
+    });
+  }
+  return { steps, timer: null };
+}
+
+function newWorkoutExercise(ex, setsCount = ex.sets) {
   return {
-    exId: ex.id, name: ex.name, muscle: ex.muscle, target: `${ex.sets}×${ex.reps}`,
-    sets: Array.from({ length: ex.sets }, () => ({ w: '', r: '', done: false })),
+    exId: ex.id, name: ex.name, muscle: ex.muscle, target: `${setsCount}×${ex.reps}`,
+    sets: Array.from({ length: setsCount }, () => ({ w: '', r: '', done: false })),
   };
 }
 
@@ -311,7 +414,7 @@ function homeView() {
     <h2 class="section">Entrenar en el gym</h2>
     <div class="routine-grid">
       ${Object.entries(ROUTINES).map(([k, r]) => `
-        <button class="routine" data-action="preview" data-r="${k}"><strong>${esc(r.name)}</strong><span>${esc(r.desc)}</span></button>`).join('')}
+        <button class="routine ${r.combo ? 'combo' : ''}" data-action="preview" data-r="${k}"><strong>${r.combo ? '🔀 ' : ''}${esc(r.name)}</strong><span>${esc(r.desc)}</span></button>`).join('')}
     </div>
     <div class="home-actions">
       <button class="btn sport wide" data-action="log-activity">+ Registrar deporte o actividad</button>
@@ -328,8 +431,42 @@ function placeholder(last, j, f, target) {
   return '';
 }
 
+function warmupView() {
+  const a = state.active, w = a.warmup;
+  const done = w.steps.filter((s) => s.done).length;
+  const mins = Math.round(w.steps.reduce((m, s) => m + (s.dur ? s.dur / 60 : s.ramp ? 3 : 0.75), 0));
+  return `
+    <header class="wk-head">
+      <div><div class="eyebrow">Calentamiento · ~${mins} min</div><h1>${esc(a.title)}</h1></div>
+      <div class="elapsed" id="elapsed">${fmtClock(Date.now() - a.start)}</div>
+    </header>
+    <p class="muted small" style="margin:-6px 0 14px">Subí la temperatura, mové las articulaciones que vas a usar y activá los músculos. Marcá cada paso al terminarlo.</p>
+    <div class="card wu-list">
+      ${w.steps.map((s, i) => {
+        const running = w.timer && w.timer.i === i;
+        return `<div class="wu-step ${s.done ? 'on' : ''} ${s.ramp ? 'ramp' : ''}">
+          <button class="wu-check" data-action="wu-toggle" data-i="${i}" aria-label="Marcar paso"><span class="sc">✓</span></button>
+          <div class="grow">
+            <div class="wu-name">${s.ramp ? howtoBtn(s.ramp, s.name) : esc(s.name)}</div>
+            <div class="muted small">${esc(s.reps || '')}${s.tip ? `${s.reps ? ' · ' : ''}${esc(s.tip)}` : ''}</div>
+          </div>
+          ${s.dur && !s.done ? `<button class="wu-timer ${running ? 'run' : ''}" data-action="wu-timer" data-i="${i}" id="wu-t-${i}">
+            ${running ? fmtClock(w.timer.until - Date.now()) : '▶ ' + fmtClock(s.dur * 1000)}</button>` : ''}
+        </div>`;
+      }).join('')}
+    </div>
+    <div class="wu-progress"><span style="width:${Math.round((done / w.steps.length) * 100)}%"></span></div>
+    <div class="wk-actions">
+      <button class="btn" data-action="wu-skip">Saltar</button>
+      <button class="btn primary" data-action="wu-finish">${done === w.steps.length ? '¡Listo! Empezar rutina' : 'Empezar rutina →'}</button>
+    </div>
+    <div style="margin-top:12px"><button class="btn danger wide" data-action="cancel-wk">Descartar entrenamiento</button></div>
+  `;
+}
+
 function workoutView() {
   const a = state.active;
+  if (a.warmup) return warmupView();
   return `
     <header class="wk-head">
       <div><div class="eyebrow">Entrenando</div><h1>${esc(a.title)}</h1></div>
@@ -337,7 +474,28 @@ function workoutView() {
     </header>
     ${a.exercises.map((e, i) => {
       const last = lastFor(e.exId);
-      return `<section class="card">
+      const total = e.sets.length, done = e.sets.filter((s) => s.done).length;
+      const complete = total > 0 && done === total;
+      const collapsed = complete && !e.expanded;
+      const progress = `
+        <div class="set-progress">
+          <span class="set-count ${complete ? 'full' : ''}">${complete ? '✓ Completado' : `${done}/${total} series`}</span>
+          <div class="set-bar"><span style="width:${total ? Math.round((done / total) * 100) : 0}%"></span></div>
+        </div>`;
+      if (collapsed) {
+        return `<section class="card ex-card complete">
+          <div class="ex-head" style="margin-bottom:6px">
+            <div><h3>${exById(e.exId) ? howtoBtn(e.exId, e.name) : esc(e.name)}</h3>
+              <div class="muted small">${esc(fmtSets(e.sets))}</div></div>
+          </div>
+          ${progress}
+          <div class="row-btns">
+            <button class="btn small ghost" data-action="ex-expand" data-i="${i}">Ver series</button>
+            <button class="btn small ghost" data-action="undo-set" data-i="${i}">↶ Deshacer última serie</button>
+          </div>
+        </section>`;
+      }
+      return `<section class="card ex-card ${complete ? 'complete' : ''}">
         <div class="ex-head">
           <div><h3>${exById(e.exId) ? howtoBtn(e.exId, e.name) : esc(e.name)}</h3>
             <div class="muted small">${esc(MUSCLES[e.muscle] || '')} · objetivo ${esc(e.target)}</div>
@@ -347,17 +505,20 @@ function workoutView() {
             <button class="icon-btn" data-action="del-ex" data-i="${i}" aria-label="Quitar ejercicio">✕</button>
           </div>
         </div>
+        ${progress}
         <div class="set-row hdr"><span>Serie</span><span>kg</span><span>Reps</span><span></span></div>
         ${e.sets.map((s, j) => `
           <div class="set-row ${s.done ? 'done' : ''}">
             <span class="set-n">${j + 1}</span>
             <input inputmode="decimal" data-i="${i}" data-j="${j}" data-f="w" value="${esc(s.w)}" placeholder="${esc(placeholder(last, j, 'w', e.target)) || '—'}" aria-label="Peso serie ${j + 1}">
             <input inputmode="numeric" data-i="${i}" data-j="${j}" data-f="r" value="${esc(s.r)}" placeholder="${esc(placeholder(last, j, 'r', e.target))}" aria-label="Repeticiones serie ${j + 1}">
-            <button class="check" data-action="toggle-set" data-i="${i}" data-j="${j}" aria-label="Marcar serie">✓</button>
+            <button class="check" data-action="toggle-set" data-i="${i}" data-j="${j}" aria-label="${s.done ? 'Desmarcar' : 'Marcar'} serie ${j + 1}">✓</button>
           </div>`).join('')}
         <div class="row-btns">
+          ${!complete ? `<button class="btn small next-set" data-action="next-set" data-i="${i}">✓ Serie ${done + 1} hecha</button>` : ''}
           <button class="btn small ghost" data-action="add-set" data-i="${i}">+ Serie</button>
           ${e.sets.length > 1 ? `<button class="btn small ghost" data-action="del-set" data-i="${i}">− Serie</button>` : ''}
+          ${complete ? `<button class="btn small ghost" data-action="ex-collapse" data-i="${i}">Ocultar</button>` : ''}
         </div>
       </section>`;
     }).join('')}
@@ -474,18 +635,33 @@ function closeSheet() {
   preview = null; activityDraft = null; pickQuery = ''; openDay = null;
 }
 
+const comboTitle = (types) => types.map((t) => ROUTINES[t].name).join(' + ');
+
 function previewSheet() {
   const r = ROUTINES[preview.routine];
+  const isCombo = !!r.combo;
+  const ready = !isCombo || preview.types.length >= 2;
   const list = preview.ids.map(exById);
+  const sets = preview.sets || {};
+  const totalSets = list.reduce((n, e) => n + (sets[e.id] ?? e.sets), 0);
+  const meta = list.length ? ` · ${list.length} ejercicios · ${totalSets} series · ~${estimateMinutes(preview.ids, sets)} min` : '';
+
   openSheet(`
-    <h2>${esc(r.name)}</h2>
-    <div class="sub">${esc(r.desc)}${list.length ? ` · ${list.length} ejercicios` : ''}</div>
+    <h2>${esc(isCombo && ready ? comboTitle(preview.types) : r.name)}</h2>
+    <div class="sub">${esc(isCombo && ready ? 'Combinación' : r.desc)}${meta}</div>
+    ${isCombo ? `
+      <div class="chips combo-chips">
+        ${COMBINABLE.map((k) => `<button class="chip ${preview.types.includes(k) ? 'on' : ''}" data-action="combo-toggle" data-r="${k}">${esc(ROUTINES[k].name)}</button>`).join('')}
+      </div>
+      <p class="muted small">Elegí 2 o 3 tipos. Se arma una sola sesión equilibrada, no la suma de las rutinas completas.</p>` : ''}
     ${list.length ? `<div class="card" style="background:var(--surface-2)">
-      ${list.map((e) => `<div class="plan-item">${howtoBtn(e.id, e.name)}<span class="tgt">${e.sets}×${esc(e.reps)}</span></div>`).join('')}
-    </div>` : '<p class="muted">Empezás vacío y vas agregando los ejercicios que quieras.</p>'}
+      ${list.map((e) => `<div class="plan-item">${howtoBtn(e.id, e.name)}<span class="tgt">${sets[e.id] ?? e.sets}×${esc(e.reps)}</span></div>`).join('')}
+    </div>
+    <p class="muted small" style="margin:8px 2px 0">🔥 Antes de empezar vas a tener un calentamiento para esta rutina.</p>`
+      : !isCombo ? '<p class="muted">Empezás vacío y vas agregando los ejercicios que quieras.</p>' : ''}
     <div class="sheet-actions">
       ${list.length ? '<button class="btn" data-action="regen">🔀 Otra</button>' : '<button class="btn" data-action="close-sheet">Volver</button>'}
-      <button class="btn primary" data-action="start">Empezar</button>
+      <button class="btn primary" data-action="start" ${ready ? '' : 'disabled'}>Empezar</button>
     </div>
   `);
 }
@@ -584,9 +760,28 @@ function startTick() {
     const el = $('#elapsed');
     if (el && state.active) el.textContent = fmtClock(Date.now() - state.active.start);
     renderRest();
+    tickWarmup();
   }, 1000);
 }
 function stopTick() { clearInterval(tickTimer); tickTimer = null; }
+
+// Cronómetro de un paso del calentamiento: al terminar, vibra y lo marca hecho
+function tickWarmup() {
+  const w = state.active?.warmup;
+  if (!w || !w.timer) return;
+  const left = w.timer.until - Date.now();
+  if (left <= 0) {
+    w.steps[w.timer.i].done = true;
+    w.timer = null;
+    save();
+    if (navigator.vibrate) navigator.vibrate([300, 150, 300]);
+    toast('⏱ ¡Tiempo!');
+    render();
+    return;
+  }
+  const b = $(`#wu-t-${w.timer.i}`);
+  if (b) b.textContent = fmtClock(left);
+}
 
 function startRest() {
   const secs = state.settings.rest;
@@ -610,32 +805,102 @@ function renderRest() {
     <button data-action="rest-add">+15s</button><button data-action="rest-skip">Saltar</button>`;
 }
 
+// ---------- Series ----------
+function toggleSet(i, j) {
+  const e = state.active.exercises[i], s = e.sets[j];
+  if (!s.done) {
+    // si está vacío, usa lo sugerido (lo de la última vez)
+    const last = lastFor(e.exId);
+    if (!s.w) s.w = placeholder(last, j, 'w', e.target);
+    if (!s.r) s.r = placeholder(last, j, 'r', e.target);
+    s.done = true;
+    if (e.sets.every((x) => x.done)) {
+      e.expanded = false;
+      toast(`✓ ${e.name} completado`, { label: 'Deshacer', fn: () => undoLastSet(i) });
+    }
+    startRest();
+  } else {
+    s.done = false;
+  }
+  save(); render();
+}
+function undoLastSet(i) {
+  const e = state.active?.exercises[i];
+  if (!e) return;
+  const j = e.sets.map((s) => s.done).lastIndexOf(true);
+  if (j < 0) return;
+  e.sets[j].done = false;
+  e.expanded = true;
+  stopRest();
+  save(); render();
+  toast(`Serie ${j + 1} desmarcada`);
+}
+
 // ---------- Acciones ----------
 const actions = {
   preview(el) {
-    preview = { routine: el.dataset.r, ids: generate(el.dataset.r) };
+    const k = el.dataset.r;
+    preview = ROUTINES[k].combo ? { routine: k, types: [], ids: [] } : { routine: k, ids: generate(k) };
     previewSheet();
   },
-  regen() { preview.ids = generate(preview.routine); previewSheet(); },
+  'combo-toggle'(el) {
+    const t = el.dataset.r, types = preview.types;
+    if (types.includes(t)) types.splice(types.indexOf(t), 1);
+    else if (types.length >= COMBO.maxTypes) return toast(`Máximo ${COMBO.maxTypes} tipos`);
+    else types.push(t);
+    Object.assign(preview, types.length >= 2 ? generateCombo(types) : { ids: [], sets: {} });
+    previewSheet();
+  },
+  regen() {
+    if (preview.types) Object.assign(preview, generateCombo(preview.types));
+    else preview.ids = generate(preview.routine);
+    previewSheet();
+  },
   start() {
     const r = ROUTINES[preview.routine];
+    const types = preview.types || [preview.routine];
+    const exercises = preview.ids.map((id) => newWorkoutExercise(exById(id), preview.sets?.[id]));
     state.active = {
-      id: uid(), routine: preview.routine, title: r.name, start: Date.now(),
-      exercises: preview.ids.map((id) => newWorkoutExercise(exById(id))),
+      id: uid(), routine: preview.routine, types,
+      title: r.combo ? comboTitle(types) : r.name, start: Date.now(),
+      exercises,
+      warmup: buildWarmup(types, exercises),
     };
     save(); closeSheet(); window.scrollTo(0, 0); render();
   },
-  'toggle-set'(el) {
-    const e = state.active.exercises[+el.dataset.i], j = +el.dataset.j, s = e.sets[j];
-    if (!s.done) {
-      // si está vacío, usa lo sugerido (lo de la última vez)
-      const last = lastFor(e.exId);
-      if (!s.w) s.w = placeholder(last, j, 'w', e.target);
-      if (!s.r) s.r = placeholder(last, j, 'r', e.target);
-      s.done = true;
-      startRest();
-    } else s.done = false;
+  'wu-toggle'(el) {
+    const w = state.active.warmup, i = +el.dataset.i;
+    w.steps[i].done = !w.steps[i].done;
+    if (w.timer && w.timer.i === i) w.timer = null;
     save(); render();
+  },
+  'wu-timer'(el) {
+    const w = state.active.warmup, i = +el.dataset.i;
+    if (w.timer && w.timer.i === i) w.timer = null; // tocar de nuevo lo pausa/cancela
+    else w.timer = { i, until: Date.now() + w.steps[i].dur * 1000 };
+    save(); render();
+  },
+  'wu-skip'() {
+    if (!confirm('¿Saltar el calentamiento? Entrar en frío aumenta el riesgo de lesión.')) return;
+    actions['wu-finish']();
+  },
+  'wu-finish'() {
+    state.active.warmup = null;
+    save(); window.scrollTo(0, 0); render();
+    toast('💪 ¡A entrenar!');
+  },
+  'toggle-set'(el) { toggleSet(+el.dataset.i, +el.dataset.j); },
+  'next-set'(el) {
+    const i = +el.dataset.i, j = state.active.exercises[i].sets.findIndex((s) => !s.done);
+    if (j >= 0) toggleSet(i, j);
+  },
+  'undo-set'(el) { undoLastSet(+el.dataset.i); },
+  'ex-expand'(el) { state.active.exercises[+el.dataset.i].expanded = true; save(); render(); },
+  'ex-collapse'(el) { state.active.exercises[+el.dataset.i].expanded = false; save(); render(); },
+  'toast-act'() {
+    const fn = toastAction?.fn;
+    $('#toast').hidden = true; toastAction = null;
+    if (fn) fn();
   },
   'add-set'(el) {
     const e = state.active.exercises[+el.dataset.i];
@@ -678,7 +943,7 @@ const actions = {
     }
     const pending = a.exercises.reduce((n, e) => n + e.sets.filter((s) => !s.done).length, 0);
     if (pending && !confirm(`Quedan ${pending} series sin marcar. Solo se guardan las marcadas. ¿Terminar?`)) return;
-    const session = { id: a.id, type: 'gym', date: dateStr(new Date(a.start)), routine: a.routine, title: a.title, start: a.start, end: Date.now(), exercises };
+    const session = { id: a.id, type: 'gym', date: dateStr(new Date(a.start)), routine: a.routine, types: a.types, title: a.title, start: a.start, end: Date.now(), exercises };
     state.sessions.push(session);
     state.active = null; save();
     view = 'home'; render(); window.scrollTo(0, 0);

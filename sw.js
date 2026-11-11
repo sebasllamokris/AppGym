@@ -1,6 +1,6 @@
 // Guarda la app en el celular para que funcione sin internet y muestra los recordatorios.
 // Subí el número de versión cada vez que cambies archivos de la app.
-const CACHE = 'appgym-v4';
+const CACHE = 'appgym-v5';
 const FILES = ['./', 'index.html', 'styles.css', 'app.js', 'data.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {

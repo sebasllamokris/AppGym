@@ -247,6 +247,59 @@ const ROUTINES = {
   plyo: { name: 'Pliometría', desc: 'Saltos y potencia explosiva', slots: [['plyoLower', 4], ['plyoUpper', 2]] },
   core: { name: 'Core', desc: 'Abdomen y zona media', slots: [['core', 4]] },
   free: { name: 'Libre', desc: 'Elegís vos los ejercicios', slots: [] },
+  combo: { name: 'Combinación', desc: 'Mezclá 2 o 3 tipos en una sola rutina', slots: [], combo: true },
 };
+
+// Límites de la Combinación: así queda una sesión de ~50-60 min y no la suma de rutinas completas.
+const COMBO = {
+  maxTypes: 3,
+  exercises: { 2: 7, 3: 7 },  // ejercicios totales según cuántos tipos elegís
+  sets: { 2: 22, 3: 22 },     // series totales máximas
+};
+
+// ---------- Calentamiento ----------
+// Cada paso: name, y reps (texto) o dur (segundos, con cronómetro). tip opcional.
+const WARMUP_STEPS = {
+  cardio: { name: 'Cardio suave (bici, cinta, elíptica o soga)', dur: 180, tip: 'Ritmo cómodo: podés hablar sin ahogarte' },
+  'arm-circles': { name: 'Círculos de brazos', reps: '10 adelante + 10 atrás' },
+  'band-dislocates': { name: 'Pasadas de banda o palo por encima de la cabeza', reps: '10', tip: 'Brazos rectos, agarre ancho' },
+  'band-er': { name: 'Rotación externa con banda', reps: '12 por brazo', tip: 'Codo pegado al cuerpo' },
+  'scap-pushup': { name: 'Flexiones escapulares', reps: '10', tip: 'Brazos rectos: solo se mueven las escápulas' },
+  'band-pull-apart': { name: 'Aperturas con banda (pull-apart)', reps: '15', tip: 'Juntá las escápulas al abrir' },
+  'scap-pull': { name: 'Dominadas escapulares', reps: '8', tip: 'Colgado, bajá los hombros sin doblar los codos' },
+  'pushup-easy': { name: 'Flexiones suaves', reps: '8', tip: 'Ritmo lento, sin llegar al fallo' },
+  'thoracic-rot': { name: 'Rotaciones torácicas en cuadrupedia', reps: '8 por lado' },
+  'cat-cow': { name: 'Gato-camello', reps: '8', tip: 'Movimiento lento vértebra por vértebra' },
+  wrist: { name: 'Movilidad de muñecas', dur: 45, tip: 'Círculos y apoyos suaves en el piso' },
+  'leg-swings': { name: 'Balanceos de pierna (adelante y lateral)', reps: '10 por pierna' },
+  'hip-circles': { name: 'Círculos de cadera', reps: '10 por lado' },
+  ankle: { name: 'Movilidad de tobillo contra la pared', reps: '10 por pie', tip: 'Rodilla hacia la pared sin levantar el talón' },
+  'glute-bridge': { name: 'Puente de glúteo', reps: '12', tip: 'Apretá arriba 1 segundo' },
+  'bw-squat': { name: 'Sentadillas sin peso', reps: '12', tip: 'Profundas y lentas' },
+  'worlds-greatest': { name: 'Estiramiento "el mejor del mundo"', reps: '5 por lado', tip: 'Zancada, codo al piso y rotación hacia arriba' },
+  'lunge-walk': { name: 'Zancadas caminando', reps: '6 por pierna' },
+  'dead-bug': { name: 'Dead bug', reps: '8 por lado', tip: 'Espalda baja pegada al piso' },
+  'bird-dog': { name: 'Bird dog', reps: '8 por lado' },
+  skipping: { name: 'Skipping (rodillas arriba)', dur: 30 },
+  'butt-kicks': { name: 'Talones a la cola', dur: 30 },
+  'jumping-jacks': { name: 'Saltos de tijera', reps: '20' },
+  pogo: { name: 'Saltitos en el lugar (pogo)', reps: '20', tip: 'Rodillas casi rectas, rebote con los tobillos' },
+  'easy-jumps': { name: 'Saltos submáximos', reps: '3 al 50% + 3 al 75%', tip: 'Prepará el sistema nervioso antes de los saltos fuertes' },
+};
+
+// Movilidad y activación específica de cada tipo (el cardio y las series de aproximación se agregan solos)
+const WARMUP_PLANS = {
+  push: ['arm-circles', 'band-dislocates', 'band-er', 'scap-pushup', 'pushup-easy'],
+  pull: ['arm-circles', 'band-dislocates', 'thoracic-rot', 'band-pull-apart', 'scap-pull'],
+  legs: ['leg-swings', 'hip-circles', 'ankle', 'glute-bridge', 'bw-squat'],
+  upper: ['arm-circles', 'band-dislocates', 'band-pull-apart', 'scap-pushup', 'scap-pull'],
+  full: ['worlds-greatest', 'arm-circles', 'leg-swings', 'band-pull-apart', 'bw-squat'],
+  arms: ['arm-circles', 'wrist', 'band-er', 'pushup-easy'],
+  cali: ['wrist', 'arm-circles', 'scap-pushup', 'scap-pull', 'bw-squat'],
+  plyo: ['leg-swings', 'ankle', 'skipping', 'butt-kicks', 'pogo', 'easy-jumps'],
+  core: ['cat-cow', 'bird-dog', 'dead-bug'],
+  free: ['arm-circles', 'leg-swings', 'worlds-greatest'],
+};
+const WARMUP_MAX_STEPS = 6; // sin contar cardio ni series de aproximación
 
 const SPORTS = ['Fútbol', 'Correr', 'Caminata', 'Ciclismo', 'Natación', 'Pádel', 'Tenis', 'Básquet', 'Vóley', 'Yoga / Movilidad', 'Artes marciales', 'Otro'];
