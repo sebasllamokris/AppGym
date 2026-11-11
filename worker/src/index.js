@@ -1,11 +1,56 @@
+import { DurableObject } from 'cloudflare:workers';
+
 // Servidor de recordatorios de AppGym (Cloudflare Worker).
 // - La app registra el celular y le cuenta sus suplementos y qué tomó hoy.
 // - Cada minuto revisa si a alguien le toca un recordatorio y le manda una notificación push.
 
 const ALLOWED_ORIGINS = ['https://sebasllamokris.github.io', 'http://localhost:5173'];
-const MAX_DEVICES = 20;
+const MAX_DEVICES = 10;
+const INACTIVE_MS = 30 * 24 * 60 * 60 * 1000; // celulares sin actividad en 30 días liberan su lugar
+const MAX_BODY = 8 * 1024;                     // bytes
 const REPEAT_AFTER_MS = 2 * 60 * 60 * 1000; // si no lo marcaste, repite una vez a las 2 horas
 const KEY = 'devices';
+
+// Solo se aceptan suscripciones de los servicios de push reales (Apple, Google, Mozilla, Microsoft).
+// Así nadie puede usar el servidor para mandar pedidos a cualquier dirección.
+const PUSH_HOSTS = [/^web\.push\.apple\.com$/, /^fcm\.googleapis\.com$/, /(^|\.)push\.services\.mozilla\.com$/, /\.notify\.windows\.com$/];
+function validSubscription(sub) {
+  try {
+    const u = new URL(sub.endpoint);
+    return u.protocol === 'https:' && PUSH_HOSTS.some((re) => re.test(u.hostname))
+      && typeof sub.keys?.p256dh === 'string' && sub.keys.p256dh.length < 200
+      && typeof sub.keys?.auth === 'string' && sub.keys.auth.length < 50;
+  } catch { return false; }
+}
+
+// Límite de pedidos: un único contador central (Durable Object), exacto aunque los
+// pedidos lleguen a máquinas distintas de Cloudflare.
+const LIMITS = { ip: [30, 60_000], new: [2, 60_000], test: [3, 60_000] }; // [máximo, ventana en ms]
+
+export class RateLimiter extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.counters = new Map();
+  }
+  check(key) {
+    const [max, windowMs] = LIMITS[key.split(':')[0]];
+    const now = Date.now();
+    let c = this.counters.get(key);
+    if (!c || now > c.reset) c = { n: 0, reset: now + windowMs };
+    c.n++;
+    this.counters.set(key, c);
+    if (this.counters.size > 5000) for (const [k, v] of this.counters) if (now > v.reset) this.counters.delete(k);
+    return c.n <= max;
+  }
+}
+
+async function allowed(env, key) {
+  try {
+    return await env.RATE_LIMITER.get(env.RATE_LIMITER.idFromName('global')).check(key);
+  } catch {
+    return true; // si el contador falla, no bloquear a la app
+  }
+}
 
 export default {
   async fetch(req, env) {
@@ -14,6 +59,7 @@ export default {
       'Access-Control-Allow-Origin': ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0],
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
+      Vary: 'Origin',
     };
     if (req.method === 'OPTIONS') return new Response(null, { headers: cors });
     const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
@@ -23,37 +69,61 @@ export default {
       if (req.method === 'GET' && path === '/vapid') return json({ publicKey: env.VAPID_PUBLIC });
       if (req.method !== 'POST') return json({ error: 'not found' }, 404);
 
-      const body = await req.json();
-      if (!body.id || typeof body.id !== 'string' || body.id.length > 64) return json({ error: 'id inválido' }, 400);
+      // 1. Solo desde la app (los navegadores siempre mandan Origin y no se puede falsificar desde una página)
+      if (!ALLOWED_ORIGINS.includes(origin)) return json({ error: 'origen no permitido' }, 403);
+      // 2. Límite por IP: 30 pedidos por minuto
+      const ip = req.headers.get('CF-Connecting-IP') || 'sin-ip';
+      if (!(await allowed(env, `ip:${ip}`))) return json({ error: 'demasiados pedidos, esperá un minuto' }, 429);
+      // 3. Tamaño máximo del pedido
+      const raw = await req.text();
+      if (raw.length > MAX_BODY) return json({ error: 'pedido demasiado grande' }, 413);
+
+      const body = JSON.parse(raw);
+      if (typeof body.id !== 'string' || body.id.length < 16 || body.id.length > 64) return json({ error: 'id inválido' }, 400);
       const devices = await getDevices(env);
+      const now = Date.now();
 
       if (path === '/subscribe' || path === '/sync') {
         const prev = devices[body.id];
         if (path === '/subscribe') {
-          if (!body.subscription?.endpoint || !body.subscription?.keys) return json({ error: 'suscripción inválida' }, 400);
-          if (!prev && Object.keys(devices).length >= MAX_DEVICES) return json({ error: 'demasiados dispositivos' }, 429);
+          if (!validSubscription(body.subscription || {})) return json({ error: 'suscripción inválida' }, 400);
+          // registrar celulares nuevos: máximo 2 por minuto por IP
+          if (!prev && !(await allowed(env, `new:${ip}`))) return json({ error: 'demasiados registros, probá más tarde' }, 429);
+          if (!prev && Object.keys(devices).length >= MAX_DEVICES) {
+            // libera el lugar del celular más inactivo si lleva 30 días sin usar la app
+            const [oldId, old] = Object.entries(devices).sort((a, b) => (a[1].lastSeen || 0) - (b[1].lastSeen || 0))[0];
+            if (now - (old.lastSeen || 0) < INACTIVE_MS) return json({ error: 'demasiados dispositivos' }, 429);
+            delete devices[oldId];
+          }
         } else if (!prev) return json({ error: 'no registrado' }, 404);
 
         devices[body.id] = {
           subscription: body.subscription || prev.subscription,
           tz: validTz(body.tz) ? body.tz : prev?.tz || 'UTC',
           supplements: cleanSupps(body.supplements ?? prev?.supplements ?? []),
-          taken: body.date ? { date: String(body.date), ids: (body.taken || []).map(String) } : prev?.taken || { date: '', ids: [] },
+          taken: /^\d{4}-\d{2}-\d{2}$/.test(body.date)
+            ? { date: body.date, ids: (Array.isArray(body.taken) ? body.taken : []).slice(0, 30).map((x) => String(x).slice(0, 64)) }
+            : prev?.taken || { date: '', ids: [] },
           sent: prev?.sent || { date: '', ids: {} },
+          lastSeen: now,
         };
         await putDevices(env, devices);
         return json({ ok: true });
       }
 
       if (path === '/unsubscribe') {
-        delete devices[body.id];
-        await putDevices(env, devices);
+        if (devices[body.id]) {
+          delete devices[body.id];
+          await putDevices(env, devices);
+        }
         return json({ ok: true });
       }
 
       if (path === '/test') {
         const d = devices[body.id];
         if (!d) return json({ error: 'no registrado' }, 404);
+        // notificación de prueba: máximo 3 por minuto por celular
+        if (!(await allowed(env, `test:${body.id}`))) return json({ error: 'esperá un minuto antes de probar de nuevo' }, 429);
         const res = await sendPush(env, d.subscription, {
           title: '💪 AppGym', body: '¡Las notificaciones funcionan! Así te vas a enterar de tus suplementos.', url: './',
         });
@@ -61,7 +131,8 @@ export default {
       }
       return json({ error: 'not found' }, 404);
     } catch (e) {
-      return json({ error: String(e.message || e) }, 500);
+      // no mostrar detalles internos
+      return json({ error: e instanceof SyntaxError ? 'pedido inválido' : 'error del servidor' }, e instanceof SyntaxError ? 400 : 500);
     }
   },
 

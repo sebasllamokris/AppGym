@@ -14,6 +14,15 @@ VAPID_SUBJECT = "https://sebasllamokris.github.io/AppGym/"
 
 # VAPID_PRIVATE se guarda como secreto: npx wrangler secret put VAPID_PRIVATE
 
+# Contador central de pedidos (protección contra abuso). Límites en LIMITS dentro de src/index.js
+[[durable_objects.bindings]]
+name = "RATE_LIMITER"
+class_name = "RateLimiter"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RateLimiter"]
+
 [[kv_namespaces]]
 binding = "SUBS"
 id = "c56cc00112474ec487e3c71cb525c962"

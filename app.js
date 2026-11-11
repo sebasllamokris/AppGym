@@ -304,7 +304,8 @@ async function enablePush() {
     const { publicKey } = await (await fetch(PUSH_API + '/vapid')).json();
     let sub = await reg.pushManager.getSubscription();
     if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(publicKey) });
-    state.push.deviceId ||= uid() + uid();
+    // identificador aleatorio e imposible de adivinar (solo lo conoce este celular)
+    state.push.deviceId ||= crypto.randomUUID ? crypto.randomUUID() : uid() + uid();
     await pushPost('/subscribe', { ...pushPayload(), subscription: sub.toJSON() });
     state.push.enabled = true; save();
     toast('🔔 Recordatorios activados');
