@@ -143,7 +143,9 @@ const concat = (...arrs) => {
 };
 
 async function vapidAuth(env, endpoint) {
-  const key = await crypto.subtle.importKey('jwk', JSON.parse(env.VAPID_PRIVATE), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']);
+  // trim + sacar BOM: PowerShell a veces lo agrega al cargar el secreto
+  const jwk = JSON.parse(env.VAPID_PRIVATE.replace(/^﻿/, '').trim());
+  const key = await crypto.subtle.importKey('jwk', jwk, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']);
   const header = b64u.encode(enc.encode(JSON.stringify({ typ: 'JWT', alg: 'ES256' })));
   const claims = b64u.encode(enc.encode(JSON.stringify({
     aud: new URL(endpoint).origin, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: env.VAPID_SUBJECT,
