@@ -1,0 +1,19 @@
+name = "appgym-push"
+main = "src/index.js"
+compatibility_date = "2025-06-01"
+workers_dev = true
+preview_urls = false
+
+# Revisa los recordatorios cada minuto
+[triggers]
+crons = ["* * * * *"]
+
+[vars]
+VAPID_PUBLIC = "BNHR3a9AgNL4QT1HtFHBzuvpSVKQTsbwllMpiP4_r-Y87v9-MbKG4RP63_beVezLXAr5_27_f5xwScbCY0dByM0"
+VAPID_SUBJECT = "https://sebasllamokris.github.io/AppGym/"
+
+# VAPID_PRIVATE se guarda como secreto: npx wrangler secret put VAPID_PRIVATE
+
+[[kv_namespaces]]
+binding = "SUBS"
+id = "c56cc00112474ec487e3c71cb525c962"

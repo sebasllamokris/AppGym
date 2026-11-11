@@ -1,2 +1,5 @@
 .claude/
 *.log
+node_modules/
+.wrangler/
+worker/.vapid-private.json

@@ -1,6 +1,8 @@
 // AppGym — lógica principal. Todo se guarda en el celular (localStorage).
 
 const STORE_KEY = 'appgym:v1';
+// Servidor que manda los recordatorios (carpeta worker/)
+const PUSH_API = 'https://appgym-push.seballamo.workers.dev';
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 
@@ -21,7 +23,7 @@ let rest = null;          // { until: ms }
 
 // ---------- Guardado ----------
 function load() {
-  const base = { sessions: [], active: null, settings: { rest: 90 }, supplements: DEFAULT_SUPPS, intake: {} };
+  const base = { sessions: [], active: null, settings: { rest: 90 }, supplements: DEFAULT_SUPPS, intake: {}, push: { enabled: false } };
   try {
     const s = JSON.parse(localStorage.getItem(STORE_KEY));
     if (s && Array.isArray(s.sessions)) return { ...base, ...s };
@@ -156,6 +158,98 @@ function suppButtons(date) {
       <span class="grow"><b>${esc(s.name)}</b>${s.dose ? ` <span class="muted small">${esc(s.dose)}</span>` : ''}</span>
       ${s.time ? `<span class="muted small">${esc(s.time)}</span>` : ''}
     </button>`).join('');
+}
+
+// ---------- Recordatorios (notificaciones push) ----------
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+let pushBusy = false;
+
+async function pushPost(path, body) {
+  const res = await fetch(PUSH_API + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
+  return data;
+}
+function pushPayload() {
+  const date = todayStr();
+  return {
+    id: state.push.deviceId,
+    tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    supplements: state.supplements,
+    date, taken: takenOn(date),
+  };
+}
+function syncPush() {
+  if (!state.push.enabled) return;
+  pushPost('/sync', pushPayload()).catch((e) => {
+    if (/no registrado/.test(e.message)) { state.push.enabled = false; save(); }
+  });
+}
+function b64ToBytes(s) {
+  const b = atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (s.length % 4)) % 4));
+  return Uint8Array.from(b, (c) => c.charCodeAt(0));
+}
+async function enablePush() {
+  if (pushBusy) return;
+  pushBusy = true;
+  try {
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') { toast('Sin permiso para notificaciones'); return; }
+    const reg = await navigator.serviceWorker.ready;
+    const { publicKey } = await (await fetch(PUSH_API + '/vapid')).json();
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(publicKey) });
+    state.push.deviceId ||= uid() + uid();
+    await pushPost('/subscribe', { ...pushPayload(), subscription: sub.toJSON() });
+    state.push.enabled = true; save();
+    toast('🔔 Recordatorios activados');
+  } catch (e) {
+    toast('No se pudo activar: ' + e.message);
+  } finally {
+    pushBusy = false; render();
+  }
+}
+async function disablePush() {
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) await sub.unsubscribe();
+    if (state.push.deviceId) await pushPost('/unsubscribe', { id: state.push.deviceId });
+  } catch (e) { /* si falla igual lo desactivamos aquí */ }
+  state.push.enabled = false; save(); render();
+  toast('Recordatorios desactivados');
+}
+function pushSection() {
+  let body;
+  if (!pushSupported() || (isIOS && !isStandalone())) {
+    body = isIOS
+      ? `<p class="small" style="margin:0">Para recibir recordatorios en iPhone, primero instalá la app: en Safari tocá <b>Compartir</b> → <b>Agregar a inicio</b>, y abrila desde ese ícono.</p>`
+      : `<p class="small" style="margin:0">Este navegador no permite notificaciones. Probá con Chrome.</p>`;
+  } else if (state.push.enabled) {
+    body = `<div class="setting-row"><span>🔔 Activados en este celular</span></div>
+      <div style="display:grid;gap:8px;margin-top:12px">
+        <button class="btn" data-action="push-test">Enviar notificación de prueba</button>
+        <button class="btn danger" data-action="push-off">Desactivar</button>
+      </div>`;
+  } else {
+    body = `<p class="small muted" style="margin:0 0 12px">Te avisamos a la hora de cada suplemento si todavía no lo marcaste, y una vez más 2 horas después.</p>
+      <button class="btn primary wide" data-action="push-on">Activar recordatorios</button>`;
+  }
+  return `<h2 class="section">Recordatorios de suplementos</h2><div class="card">${body}</div>`;
+}
+
+// Al tocar una notificación se abre la app con ?take=ids y se marcan como tomados
+function handleTakeLink() {
+  const params = new URLSearchParams(location.search);
+  const ids = params.get('take');
+  if (!ids) return;
+  const today = todayStr();
+  const valid = ids.split(',').filter((id) => state.supplements.some((s) => s.id === id));
+  valid.forEach((id) => { if (!isTaken(id, today)) toggleTaken(id, today); });
+  history.replaceState(null, '', location.pathname);
+  if (valid.length) setTimeout(() => toast('✅ Marcado como tomado'), 300);
 }
 
 function sessionSummary(s) {
@@ -323,6 +417,7 @@ function settingsView() {
         ${[0, 45, 60, 90, 120, 150, 180, 240].map((s) => `<option value="${s}" ${s === r ? 'selected' : ''}>${s ? fmtClock(s * 1000) : 'Sin timer'}</option>`).join('')}
       </select>
     </div>
+    ${pushSection()}
     <h2 class="section">Tus datos</h2>
     <p class="muted small">Todo se guarda solo en este celular. Exportá una copia de vez en cuando para no perder tu historial.</p>
     <div class="card" style="display:grid;gap:10px">
@@ -579,6 +674,13 @@ const actions = {
     render();
     if (openDay) daySheet(openDay);
     if (nowTaken && date === todayStr() && allTaken(date)) toast('✅ Todo tomado hoy');
+    if (date === todayStr()) syncPush();
+  },
+  'push-on'() { enablePush(); },
+  'push-off'() { disablePush(); },
+  async 'push-test'() {
+    try { await pushPost('/test', { id: state.push.deviceId }); toast('Enviada, debería llegar en segundos'); }
+    catch (e) { toast('No se pudo enviar: ' + e.message); }
   },
   'edit-supps'() { suppEditorSheet(); },
   'add-supp'() {
@@ -594,7 +696,7 @@ const actions = {
   },
   'done-supps'() {
     state.supplements = state.supplements.filter((s) => s.name.trim());
-    save(); closeSheet(); render();
+    save(); closeSheet(); render(); syncPush();
   },
 
   day(el) { daySheet(el.dataset.d); },
@@ -674,9 +776,16 @@ document.addEventListener('change', async (ev) => {
 });
 
 // Al volver a la app después de bloquear el celular, actualizar timers
-document.addEventListener('visibilitychange', () => { if (!document.hidden) renderRest(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  renderRest();
+  syncPush();
+  if (!state.active) render(); // por si cambió el día con la app abierta
+});
 
+handleTakeLink();
 render();
+syncPush();
 
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
