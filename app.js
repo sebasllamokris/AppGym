@@ -4,6 +4,12 @@ const STORE_KEY = 'appgym:v1';
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 
+// Suplementos sugeridos la primera vez (se pueden editar o borrar)
+const DEFAULT_SUPPS = [
+  { id: 'creatina', name: 'Creatina', dose: '5 g', time: '09:00' },
+  { id: 'vitaminas', name: 'Vitaminas', dose: '', time: '09:00' },
+];
+
 let state = load();
 let view = 'home';
 let calMonth = monthStart(new Date());
@@ -15,11 +21,12 @@ let rest = null;          // { until: ms }
 
 // ---------- Guardado ----------
 function load() {
+  const base = { sessions: [], active: null, settings: { rest: 90 }, supplements: DEFAULT_SUPPS, intake: {} };
   try {
     const s = JSON.parse(localStorage.getItem(STORE_KEY));
-    if (s && Array.isArray(s.sessions)) return { settings: { rest: 90 }, active: null, ...s };
+    if (s && Array.isArray(s.sessions)) return { ...base, ...s };
   } catch (e) { /* datos dañados o sin acceso */ }
-  return { sessions: [], active: null, settings: { rest: 90 } };
+  return base;
 }
 function save() {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
@@ -122,6 +129,35 @@ function weekCount() {
   const from = dateStr(monday);
   return [...activeDays()].filter((x) => x >= from).length;
 }
+// ---------- Suplementos ----------
+const takenOn = (date) => state.intake[date] || [];
+const isTaken = (id, date) => takenOn(date).includes(id);
+function allTaken(date) {
+  return state.supplements.length > 0 && state.supplements.every((s) => isTaken(s.id, date));
+}
+function toggleTaken(id, date) {
+  const list = takenOn(date).filter((x) => x !== id);
+  if (!isTaken(id, date)) list.push(id);
+  if (list.length) state.intake[date] = list; else delete state.intake[date];
+  save();
+  return list.includes(id);
+}
+function suppStreak() {
+  const d = new Date();
+  if (!allTaken(dateStr(d))) d.setDate(d.getDate() - 1);
+  let n = 0;
+  while (allTaken(dateStr(d))) { n++; d.setDate(d.getDate() - 1); }
+  return n;
+}
+function suppButtons(date) {
+  return state.supplements.map((s) => `
+    <button class="supp ${isTaken(s.id, date) ? 'on' : ''}" data-action="take" data-id="${esc(s.id)}" data-d="${date}">
+      <span class="sc">✓</span>
+      <span class="grow"><b>${esc(s.name)}</b>${s.dose ? ` <span class="muted small">${esc(s.dose)}</span>` : ''}</span>
+      ${s.time ? `<span class="muted small">${esc(s.time)}</span>` : ''}
+    </button>`).join('');
+}
+
 function sessionSummary(s) {
   if (s.type === 'activity') {
     return [s.minutes ? `${s.minutes} min` : '', s.intensity ? `intensidad ${s.intensity}` : ''].filter(Boolean).join(' · ');
@@ -173,6 +209,11 @@ function homeView() {
       <div class="stat"><b>${weekCount()}</b><span>días esta semana</span></div>
       <div class="stat"><b>${state.sessions.length}</b><span>sesiones</span></div>
     </div>
+    <h2 class="section section-row"><span>Suplementos de hoy</span><button class="link" data-action="edit-supps">Editar</button></h2>
+    ${state.supplements.length ? `<div class="card supps">
+      ${suppButtons(today)}
+      ${suppStreak() ? `<div class="muted small supp-streak">🔥 ${suppStreak()} ${suppStreak() === 1 ? 'día' : 'días'} seguidos tomando todo</div>` : ''}
+    </div>` : '<button class="btn ghost wide" data-action="edit-supps">+ Agregar suplementos</button>'}
     <h2 class="section">Entrenar en el gym</h2>
     <div class="routine-grid">
       ${Object.entries(ROUTINES).map(([k, r]) => `
@@ -249,9 +290,9 @@ function calendarView() {
     const ds = `${y}-${pad(m + 1)}-${pad(d)}`;
     const list = byDay[ds] || [];
     if (list.length) activeCount++;
-    const gym = list.some((s) => s.type === 'gym'), act = list.some((s) => s.type === 'activity');
+    const gym = list.some((s) => s.type === 'gym'), act = list.some((s) => s.type === 'activity'), sup = allTaken(ds);
     cells += `<button class="cal-day ${list.length ? 'active' : ''} ${ds === today ? 'today' : ''}" data-action="day" data-d="${ds}">
-      <span>${d}</span><span class="dots">${gym ? '<i></i>' : ''}${act ? '<i class="act"></i>' : ''}</span></button>`;
+      <span>${d}</span><span class="dots">${gym ? '<i></i>' : ''}${act ? '<i class="act"></i>' : ''}${sup ? '<i class="sup"></i>' : ''}</span></button>`;
   }
   const label = first.toLocaleDateString('es', { month: 'long', year: 'numeric' });
   return `
@@ -265,7 +306,7 @@ function calendarView() {
       ${['L', 'M', 'X', 'J', 'V', 'S', 'D'].map((w) => `<div class="cal-wd">${w}</div>`).join('')}
       ${cells}
     </div>
-    <div class="legend"><span><i></i>Gym</span><span><i class="act"></i>Deporte / actividad</span></div>
+    <div class="legend"><span><i></i>Gym</span><span><i class="act"></i>Deporte</span><span><i class="sup"></i>Suplementos</span></div>
     <h2 class="section">Este mes</h2>
     <div class="card"><b>${activeCount}</b> <span class="muted">días activos de ${daysIn}</span></div>
   `;
@@ -301,7 +342,7 @@ function openSheet(html) {
 }
 function closeSheet() {
   $('#sheet').hidden = true;
-  preview = null; activityDraft = null; pickQuery = '';
+  preview = null; activityDraft = null; pickQuery = ''; openDay = null;
 }
 
 function previewSheet() {
@@ -363,8 +404,10 @@ function readActivityInputs() {
   if ($('#act-other')) a.other = $('#act-other').value;
 }
 
+let openDay = null; // día abierto en la hoja, para refrescarla
 function daySheet(ds) {
   const list = state.sessions.filter((s) => s.date === ds);
+  openDay = ds;
   openSheet(`
     <h2 class="cap">${esc(fmtLongDate(ds))}</h2>
     <div class="sub">${list.length ? `${list.length} ${list.length === 1 ? 'registro' : 'registros'}` : 'Día sin actividad'}</div>
@@ -379,6 +422,29 @@ function daySheet(ds) {
         ${s.notes ? `<p class="small" style="margin:8px 0 0">${esc(s.notes)}</p>` : ''}
       </div>`).join('')}
     <button class="btn sport wide" data-action="log-activity" data-d="${ds}" style="margin-top:6px">+ Registrar actividad este día</button>
+    ${state.supplements.length && ds <= todayStr() ? `<h2 class="section">Suplementos</h2><div class="card supps" style="background:var(--surface-2)">${suppButtons(ds)}</div>` : ''}
+  `);
+}
+
+function suppEditorSheet() {
+  openSheet(`
+    <h2>Suplementos</h2>
+    <div class="sub">Lo que tomás cada día y a qué hora querés el recordatorio</div>
+    ${state.supplements.map((s, i) => `
+      <div class="card supp-edit" style="background:var(--surface-2)">
+        <div class="supp-edit-row">
+          <input class="input" data-si="${i}" data-sf="name" value="${esc(s.name)}" placeholder="Nombre" aria-label="Nombre">
+          <button class="icon-btn" data-action="del-supp" data-i="${i}" aria-label="Borrar suplemento">🗑</button>
+        </div>
+        <div class="supp-edit-row">
+          <input class="input" data-si="${i}" data-sf="dose" value="${esc(s.dose)}" placeholder="Dosis (ej: 5 g)" aria-label="Dosis">
+          <input class="input" type="time" data-si="${i}" data-sf="time" value="${esc(s.time)}" aria-label="Hora">
+        </div>
+      </div>`).join('')}
+    <button class="btn ghost wide" data-action="add-supp">+ Agregar suplemento</button>
+    <div class="sheet-actions" style="grid-template-columns:1fr">
+      <button class="btn primary" data-action="done-supps">Listo</button>
+    </div>
   `);
 }
 
@@ -507,6 +573,30 @@ const actions = {
     save(); closeSheet(); render(); toast('⚡ Actividad registrada');
   },
 
+  take(el) {
+    const date = el.dataset.d || todayStr();
+    const nowTaken = toggleTaken(el.dataset.id, date);
+    render();
+    if (openDay) daySheet(openDay);
+    if (nowTaken && date === todayStr() && allTaken(date)) toast('✅ Todo tomado hoy');
+  },
+  'edit-supps'() { suppEditorSheet(); },
+  'add-supp'() {
+    state.supplements.push({ id: uid(), name: '', dose: '', time: '09:00' });
+    save(); suppEditorSheet();
+    const inputs = $$('[data-sf="name"]');
+    inputs[inputs.length - 1]?.focus();
+  },
+  'del-supp'(el) {
+    const s = state.supplements[+el.dataset.i];
+    if (s.name && !confirm(`¿Borrar ${s.name}?`)) return;
+    state.supplements.splice(+el.dataset.i, 1); save(); suppEditorSheet();
+  },
+  'done-supps'() {
+    state.supplements = state.supplements.filter((s) => s.name.trim());
+    save(); closeSheet(); render();
+  },
+
   day(el) { daySheet(el.dataset.d); },
   'del-session'(el) {
     if (!confirm('¿Borrar este registro? No se puede deshacer.')) return;
@@ -520,7 +610,7 @@ const actions = {
   'close-sheet'() { closeSheet(); },
 
   export() {
-    const blob = new Blob([JSON.stringify({ app: 'AppGym', version: 1, exported: new Date().toISOString(), sessions: state.sessions, settings: state.settings }, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify({ app: 'AppGym', version: 1, exported: new Date().toISOString(), sessions: state.sessions, settings: state.settings, supplements: state.supplements, intake: state.intake }, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `appgym-backup-${todayStr()}.json`;
@@ -549,6 +639,11 @@ document.addEventListener('input', (ev) => {
     $('#pick-list').innerHTML = tmp.querySelector('#pick-list').innerHTML;
     return;
   }
+  if (t.dataset.sf) {
+    state.supplements[+t.dataset.si][t.dataset.sf] = t.value;
+    save();
+    return;
+  }
   if (t.dataset.f && state.active) {
     state.active.exercises[+t.dataset.i].sets[+t.dataset.j][t.dataset.f] = t.value.replace(',', '.');
     save();
@@ -565,6 +660,13 @@ document.addEventListener('change', async (ev) => {
       const ids = new Set(state.sessions.map((s) => s.id));
       const nuevos = data.sessions.filter((s) => s && s.id && s.date && !ids.has(s.id));
       state.sessions.push(...nuevos);
+      if (Array.isArray(data.supplements)) {
+        const have = new Set(state.supplements.map((s) => s.id));
+        state.supplements.push(...data.supplements.filter((s) => s && s.id && !have.has(s.id)));
+      }
+      for (const [d, ids] of Object.entries(data.intake || {})) {
+        if (Array.isArray(ids)) state.intake[d] = [...new Set([...takenOn(d), ...ids])];
+      }
       save(); render(); toast(`Importadas ${nuevos.length} sesiones`);
     } catch (e) { toast('Archivo no válido'); }
     t.value = '';

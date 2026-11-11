@@ -8,6 +8,7 @@
   --accent: #c6f432;
   --accent-ink: #141a00;
   --sport: #4cc9f0;
+  --supp: #b58cff;
   --danger: #ff6b6b;
   --radius: 16px;
   --safe-b: env(safe-area-inset-bottom, 0px);
@@ -117,6 +118,29 @@ h3 { font-size: 17px; margin: 0; }
 .rest .t { font-size: 22px; font-variant-numeric: tabular-nums; flex: 1; }
 .rest button { border: 0; border-radius: 10px; padding: 8px 12px; background: rgba(0,0,0,.15); font-weight: 700; }
 
+/* Suplementos */
+.section-row { display: flex; justify-content: space-between; align-items: center; }
+.link { border: 0; background: none; color: var(--supp); font-size: 13px; font-weight: 600; text-transform: none; letter-spacing: 0; padding: 4px 0; }
+.supps { display: grid; gap: 8px; }
+.supp {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  border: 1px solid var(--line); background: transparent; border-radius: 12px; padding: 10px 12px; min-height: 52px;
+}
+.supp .sc {
+  width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--line); flex: none;
+  display: grid; place-items: center; color: transparent; font-weight: 800; font-size: 15px;
+}
+.supp .grow { flex: 1; min-width: 0; }
+.supp.on { border-color: transparent; background: rgba(181,140,255,.12); }
+.supp.on .sc { background: var(--supp); border-color: var(--supp); color: #1a0f2e; }
+.supp.on b { text-decoration: line-through; text-decoration-color: rgba(241,243,247,.4); }
+.supp-streak { padding: 2px 2px 0; }
+.supp-edit { display: grid; gap: 8px; }
+.supp-edit-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.supp-edit-row .input { min-width: 0; }
+.supp-edit-row .icon-btn { height: 46px; width: 46px; }
+.supp-edit-row input[type=time] { width: 120px; }
+
 /* Calendario */
 .cal-nav { display: flex; align-items: center; justify-content: space-between; margin: 16px 0 12px; }
 .cal-nav strong { font-size: 18px; display: inline-block; }
@@ -133,9 +157,11 @@ h3 { font-size: 17px; margin: 0; }
 .cal-day .dots { display: flex; gap: 3px; height: 6px; }
 .cal-day .dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 .cal-day .dots i.act { background: var(--sport); }
+.cal-day .dots i.sup { background: var(--supp); }
 .legend { display: flex; gap: 16px; color: var(--muted); font-size: 13px; margin-top: 14px; }
 .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--accent); }
 .legend i.act { background: var(--sport); }
+.legend i.sup { background: var(--supp); }
 
 /* Formularios */
 label.field { display: block; margin-bottom: 14px; }
