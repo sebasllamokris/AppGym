@@ -71,8 +71,8 @@ function toast(msg) {
 }
 
 // ---------- Generador de rutinas ----------
-function pickFor(muscle, n, exclude) {
-  const pool = EXERCISES.filter((e) => e.muscle === muscle && !exclude.has(e.id));
+function pickFor(muscle, n, exclude, tag) {
+  const pool = EXERCISES.filter((e) => e.muscle === muscle && !exclude.has(e.id) && (!tag || e.tags?.includes(tag)));
   const compounds = shuffle(pool.filter((e) => e.compound));
   const out = [];
   if (compounds.length) out.push(compounds[0]); // el primero de cada grupo, multiarticular
@@ -86,7 +86,7 @@ function pickFor(muscle, n, exclude) {
 function generate(routineKey) {
   const r = ROUTINES[routineKey];
   const used = new Set();
-  return r.slots.flatMap(([m, n]) => pickFor(m, n, used)).map((e) => e.id);
+  return r.slots.flatMap(([m, n, tag]) => pickFor(m, n, used, tag)).map((e) => e.id);
 }
 
 function newWorkoutExercise(ex) {
@@ -339,7 +339,7 @@ function workoutView() {
       const last = lastFor(e.exId);
       return `<section class="card">
         <div class="ex-head">
-          <div><h3>${esc(e.name)}</h3>
+          <div><h3>${exById(e.exId) ? howtoBtn(e.exId, e.name) : esc(e.name)}</h3>
             <div class="muted small">${esc(MUSCLES[e.muscle] || '')} · objetivo ${esc(e.target)}</div>
             ${last ? `<div class="last">Última vez: ${esc(fmtSets(last))}</div>` : ''}</div>
           <div class="ex-menu">
@@ -430,6 +430,40 @@ function settingsView() {
   `;
 }
 
+// ---------- Ayuda visual (globito al tocar un ejercicio) ----------
+const howtoBtn = (id, name) =>
+  `<button class="ex-name" data-action="howto" data-id="${esc(id)}">${esc(name)} <span class="info" aria-hidden="true">ⓘ</span></button>`;
+let howtoOpen = null;
+
+function hideHowTo() {
+  $('#howto').hidden = true;
+  howtoOpen = null;
+}
+function showHowTo(id, anchor) {
+  const e = exById(id);
+  if (!e) return;
+  const box = $('#howto');
+  const img = e.img ? `img/ex/${encodeURIComponent(e.img)}/` : '';
+  box.innerHTML = `
+    <div class="howto-head">
+      <div><b>${esc(e.name)}</b><div class="muted small">${esc(MUSCLES[e.muscle] || '')} · ${e.sets}×${esc(e.reps)}</div></div>
+      <button class="icon-btn" data-action="howto-close" aria-label="Cerrar">✕</button>
+    </div>
+    ${img ? `<div class="howto-img"><img src="${img}0.jpg" alt="Posición inicial"><img class="b" src="${img}1.jpg" alt="Posición final"></div>` : ''}
+    <ul class="howto-tips">${(e.tips || []).map((t) => `<li>${esc(t)}</li>`).join('')}</ul>`;
+  box.hidden = false;
+  howtoOpen = id;
+
+  // ubicarlo debajo del nombre (o arriba si no entra)
+  const r = anchor.getBoundingClientRect();
+  const w = Math.min(340, window.innerWidth - 32);
+  box.style.width = w + 'px';
+  box.style.left = Math.max(16, Math.min(r.left, window.innerWidth - w - 16)) + 'px';
+  const h = box.offsetHeight;
+  const below = r.bottom + 8, above = r.top - h - 8;
+  box.style.top = (below + h <= window.innerHeight - 8 || above < 8 ? Math.max(8, Math.min(below, window.innerHeight - h - 8)) : above) + 'px';
+}
+
 // ---------- Hojas (modales) ----------
 function openSheet(html) {
   $('#sheet-body').innerHTML = html;
@@ -447,7 +481,7 @@ function previewSheet() {
     <h2>${esc(r.name)}</h2>
     <div class="sub">${esc(r.desc)}${list.length ? ` · ${list.length} ejercicios` : ''}</div>
     ${list.length ? `<div class="card" style="background:var(--surface-2)">
-      ${list.map((e) => `<div class="plan-item"><span>${esc(e.name)}</span><span class="tgt">${e.sets}×${esc(e.reps)}</span></div>`).join('')}
+      ${list.map((e) => `<div class="plan-item">${howtoBtn(e.id, e.name)}<span class="tgt">${e.sets}×${esc(e.reps)}</span></div>`).join('')}
     </div>` : '<p class="muted">Empezás vacío y vas agregando los ejercicios que quieras.</p>'}
     <div class="sheet-actions">
       ${list.length ? '<button class="btn" data-action="regen">🔀 Otra</button>' : '<button class="btn" data-action="close-sheet">Volver</button>'}
@@ -699,6 +733,12 @@ const actions = {
     save(); closeSheet(); render(); syncPush();
   },
 
+  howto(el) {
+    if (howtoOpen === el.dataset.id) hideHowTo();
+    else showHowTo(el.dataset.id, el);
+  },
+  'howto-close'() { hideHowTo(); },
+
   day(el) { daySheet(el.dataset.d); },
   'del-session'(el) {
     if (!confirm('¿Borrar este registro? No se puede deshacer.')) return;
@@ -727,6 +767,8 @@ const actions = {
 };
 
 document.addEventListener('click', (ev) => {
+  // tocar fuera del globito lo cierra
+  if (howtoOpen && !ev.target.closest('#howto') && !ev.target.closest('[data-action="howto"]')) hideHowTo();
   const tab = ev.target.closest('#tabs button');
   if (tab) { view = tab.dataset.view; if (view === 'calendar') calMonth = monthStart(new Date()); render(); window.scrollTo(0, 0); return; }
   const el = ev.target.closest('[data-action]');
@@ -776,6 +818,10 @@ document.addEventListener('change', async (ev) => {
 });
 
 // Al volver a la app después de bloquear el celular, actualizar timers
+// al hacer scroll el globito queda desubicado: se cierra
+document.addEventListener('scroll', () => { if (howtoOpen) hideHowTo(); }, { capture: true, passive: true });
+window.addEventListener('resize', () => { if (howtoOpen) hideHowTo(); });
+
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
   renderRest();

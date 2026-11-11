@@ -199,6 +199,25 @@ textarea.input { min-height: 80px; resize: vertical; }
 /* Ajustes */
 .setting-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 
+/* Ayuda visual de ejercicios */
+.ex-name {
+  border: 0; background: none; padding: 0; text-align: left; font: inherit; color: inherit;
+  text-decoration: underline dotted rgba(241,243,247,.35); text-underline-offset: 4px;
+}
+.ex-name .info { color: var(--accent); font-size: .85em; text-decoration: none; display: inline-block; }
+.howto {
+  position: fixed; z-index: 70; background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: 16px; padding: 12px; box-shadow: 0 12px 40px rgba(0,0,0,.6); animation: pop .14s ease-out;
+}
+@keyframes pop { from { opacity: 0; transform: translateY(-4px) scale(.98); } }
+.howto-head { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; margin-bottom: 10px; }
+.howto-head .icon-btn { width: 32px; height: 32px; flex: none; }
+.howto-img { position: relative; aspect-ratio: 4 / 3; border-radius: 10px; overflow: hidden; background: #fff; }
+.howto-img img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.howto-img img.b { animation: flip 2s steps(1, end) infinite; }
+@keyframes flip { 0% { opacity: 0; } 50% { opacity: 1; } }
+.howto-tips { margin: 10px 0 0; padding-left: 18px; font-size: 14px; display: grid; gap: 4px; }
+
 /* Barra inferior */
 .tabs {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;

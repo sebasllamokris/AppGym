@@ -9,6 +9,11 @@ App web para el celular para registrar entrenamientos de gimnasio y deportes. Fu
 - **Calendario**: muestra los días en que entrenaste (verde = gym, celeste = deporte) y el detalle de cada día.
 - **Copia de seguridad**: exportar e importar desde Ajustes.
 
+- **Ayuda visual**: tocá el nombre de un ejercicio (ⓘ) para ver fotos de cómo se hace y consejos de técnica.
+- **Calistenia y Pliometría**: rutinas de peso corporal y de saltos/potencia.
+
+Las fotos de los ejercicios son de [free-exercise-db](https://github.com/yuhonas/free-exercise-db) (dominio público, Unlicense).
+
 ## Archivos
 - `data.js`: repertorio de ejercicios y rutinas (acá se agregan ejercicios nuevos)
 - `app.js`: la lógica y las pantallas
