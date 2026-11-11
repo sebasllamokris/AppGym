@@ -3,3 +3,4 @@
 node_modules/
 .wrangler/
 worker/.vapid-private.json
+CLAVES.md
