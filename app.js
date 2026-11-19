@@ -23,7 +23,7 @@ let rest = null;          // { until: ms }
 
 // ---------- Guardado ----------
 function load() {
-  const base = { sessions: [], active: null, settings: { rest: 90 }, supplements: DEFAULT_SUPPS, intake: {}, push: { enabled: false } };
+  const base = { sessions: [], active: null, settings: { rest: 90 }, supplements: DEFAULT_SUPPS, intake: {}, push: { enabled: false }, membership: null };
   try {
     const s = JSON.parse(localStorage.getItem(STORE_KEY));
     if (s && Array.isArray(s.sessions)) return { ...base, ...s };
@@ -277,11 +277,13 @@ async function pushPost(path, body) {
 }
 function pushPayload() {
   const date = todayStr();
+  const m = state.membership;
   return {
     id: state.push.deviceId,
     tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
     supplements: state.supplements,
     date, taken: takenOn(date),
+    membership: m ? { due: membershipDue(m), hour: m.hour || '09:00' } : null,
   };
 }
 function syncPush() {
@@ -344,9 +346,77 @@ function pushSection() {
   return `<h2 class="section">Recordatorios de suplementos</h2><div class="card">${body}</div>`;
 }
 
-// Al tocar una notificación se abre la app con ?take=ids y se marcan como tomados
+// ---------- Membresía del gym ----------
+// state.membership = { lastPaid: 'YYYY-MM-DD', hour: 'HH:MM', history: ['YYYY-MM-DD', …] }
+// Vence un mes después del último pago (31 ene → 28/29 feb).
+function addOneMonth(ds) {
+  const [y, m, d] = ds.split('-').map(Number);
+  const last = new Date(y, m + 1, 0).getDate(); // último día del mes siguiente
+  return dateStr(new Date(y, m, Math.min(d, last)));
+}
+const membershipDue = (m) => addOneMonth(m.lastPaid);
+const daysBetween = (a, b) => Math.round((parseDate(b) - parseDate(a)) / 86400000);
+function membershipStatus() {
+  const m = state.membership;
+  if (!m) return null;
+  const due = membershipDue(m);
+  const left = daysBetween(todayStr(), due); // días que faltan (negativo = vencida)
+  const total = daysBetween(m.lastPaid, due);
+  return { due, left, isDue: left <= 0, progress: Math.min(1, Math.max(0, 1 - left / total)) };
+}
+const fmtDay = (ds) => parseDate(ds).toLocaleDateString('es', { day: 'numeric', month: 'long' });
+
+function membershipCard() {
+  const st = membershipStatus();
+  if (!st) return `<button class="btn ghost wide" data-action="edit-membership">+ Registrar pago de la membresía</button>`;
+  const label = st.left > 1 ? `Faltan ${st.left} días`
+    : st.left === 1 ? 'Vence mañana'
+    : st.left === 0 ? 'Vence hoy'
+    : `Vencida hace ${-st.left} ${st.left === -1 ? 'día' : 'días'}`;
+  const tone = st.isDue ? 'due' : st.left <= 3 ? 'soon' : 'ok';
+  return `<div class="card membership ${tone}" id="membership">
+    <div class="mem-head">
+      <div><div class="muted small">Próximo pago</div><b class="mem-date">${esc(fmtDay(st.due))}</b></div>
+      <span class="mem-pill">${label}</span>
+    </div>
+    <div class="set-bar mem-bar"><span style="width:${Math.round(st.progress * 100)}%"></span></div>
+    <div class="muted small" style="margin:8px 0 12px">Último pago: ${esc(fmtDay(state.membership.lastPaid))}</div>
+    ${st.isDue
+      ? '<button class="btn primary wide" data-action="mem-paid">✓ Pagado</button>'
+      : `<button class="btn wide" disabled>✓ Pagado · se activa el ${esc(fmtDay(st.due))}</button>`}
+    ${!state.push.enabled ? '<p class="muted small" style="margin:10px 0 0">🔔 Activá los recordatorios en Ajustes para recibir el aviso de vencimiento.</p>' : ''}
+  </div>`;
+}
+
+function membershipSheet() {
+  const m = state.membership || { lastPaid: todayStr(), hour: '09:00', history: [] };
+  const hist = [...(m.history || [])].reverse().slice(0, 12);
+  openSheet(`
+    <h2>Membresía del gym</h2>
+    <div class="sub">Cargá la fecha de tu último pago. Vence un mes después y te avisamos ese día.</div>
+    <label class="field"><span>Fecha del último pago</span>
+      <input class="input" type="date" id="mem-date" value="${esc(m.lastPaid)}" max="${todayStr()}"></label>
+    <label class="field"><span>Hora del aviso</span>
+      <input class="input" type="time" id="mem-hour" value="${esc(m.hour || '09:00')}"></label>
+    ${hist.length ? `<h2 class="section">Pagos registrados</h2>
+      <div class="card" style="background:var(--surface-2)">${hist.map((d) => `<div class="plan-item"><span>${esc(fmtLongDate(d))}</span><span class="tgt">✓</span></div>`).join('')}</div>` : ''}
+    ${state.membership ? '<button class="btn danger wide" data-action="mem-remove" style="margin-top:8px">Quitar membresía</button>' : ''}
+    <div class="sheet-actions">
+      <button class="btn" data-action="close-sheet">Cancelar</button>
+      <button class="btn primary" data-action="mem-save">Guardar</button>
+    </div>
+  `);
+}
+
+// Al tocar una notificación se abre la app con ?take=ids (suplementos) o ?membership=1
 function handleTakeLink() {
   const params = new URLSearchParams(location.search);
+  if (params.get('membership')) {
+    history.replaceState(null, '', location.pathname);
+    view = 'home';
+    setTimeout(() => { $('#membership')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); toast('💳 Tu membresía del gym venció'); }, 400);
+    return;
+  }
   const ids = params.get('take');
   if (!ids) return;
   const today = todayStr();
@@ -412,6 +482,8 @@ function homeView() {
       ${suppButtons(today)}
       ${suppStreak() ? `<div class="muted small supp-streak">🔥 ${suppStreak()} ${suppStreak() === 1 ? 'día' : 'días'} seguidos tomando todo</div>` : ''}
     </div>` : '<button class="btn ghost wide" data-action="edit-supps">+ Agregar suplementos</button>'}
+    <h2 class="section section-row"><span>Membresía del gym</span>${state.membership ? '<button class="link" data-action="edit-membership">Editar</button>' : ''}</h2>
+    ${membershipCard()}
     <h2 class="section">Entrenar en el gym</h2>
     <div class="routine-grid">
       ${Object.entries(ROUTINES).map(([k, r]) => `
@@ -982,6 +1054,39 @@ const actions = {
     try { await pushPost('/test', { id: state.push.deviceId }); toast('Enviada, debería llegar en segundos'); }
     catch (e) { toast('No se pudo enviar: ' + e.message); }
   },
+  'edit-membership'() { membershipSheet(); },
+  'mem-save'() {
+    const date = $('#mem-date').value, hour = $('#mem-hour').value || '09:00';
+    if (!date) return toast('Elegí la fecha del último pago');
+    if (date > todayStr()) return toast('La fecha no puede ser futura');
+    const prev = state.membership;
+    const history = prev?.history ? [...prev.history] : [];
+    if (!history.includes(date)) history.push(date);
+    history.sort();
+    state.membership = { lastPaid: date, hour, history };
+    save(); closeSheet(); render(); syncPush();
+    toast(`Guardado · vence el ${fmtDay(membershipDue(state.membership))}`);
+  },
+  'mem-paid'() {
+    const today = todayStr(), m = state.membership;
+    if (!confirm('¿Confirmás que pagaste la membresía hoy?')) return;
+    const prevPaid = m.lastPaid;
+    m.lastPaid = today;
+    m.history = [...new Set([...(m.history || []), today])].sort();
+    save(); render(); syncPush();
+    toast(`✅ Pago registrado · próximo: ${fmtDay(membershipDue(m))}`, {
+      label: 'Deshacer',
+      fn: () => {
+        m.lastPaid = prevPaid; m.history = m.history.filter((d) => d !== today || d === prevPaid);
+        save(); render(); syncPush();
+      },
+    });
+  },
+  'mem-remove'() {
+    if (!confirm('¿Quitar la membresía? Se borra también el historial de pagos.')) return;
+    state.membership = null;
+    save(); closeSheet(); render(); syncPush();
+  },
   'edit-supps'() { suppEditorSheet(); },
   'add-supp'() {
     state.supplements.push({ id: uid(), name: '', dose: '', time: '09:00' });
@@ -1018,7 +1123,7 @@ const actions = {
   'close-sheet'() { closeSheet(); },
 
   export() {
-    const blob = new Blob([JSON.stringify({ app: 'AppGym', version: 1, exported: new Date().toISOString(), sessions: state.sessions, settings: state.settings, supplements: state.supplements, intake: state.intake }, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify({ app: 'AppGym', version: 1, exported: new Date().toISOString(), sessions: state.sessions, settings: state.settings, supplements: state.supplements, intake: state.intake, membership: state.membership }, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `appgym-backup-${todayStr()}.json`;
@@ -1074,6 +1179,7 @@ document.addEventListener('change', async (ev) => {
         const have = new Set(state.supplements.map((s) => s.id));
         state.supplements.push(...data.supplements.filter((s) => s && s.id && !have.has(s.id)));
       }
+      if (!state.membership && data.membership?.lastPaid) state.membership = data.membership;
       for (const [d, ids] of Object.entries(data.intake || {})) {
         if (Array.isArray(ids)) state.intake[d] = [...new Set([...takenOn(d), ...ids])];
       }

@@ -1,6 +1,6 @@
 // Guarda la app en el celular para que funcione sin internet y muestra los recordatorios.
 // Subí el número de versión cada vez que cambies archivos de la app.
-const CACHE = 'appgym-v8';
+const CACHE = 'appgym-v9';
 const FILES = ['./', 'index.html', 'styles.css', 'app.js', 'data.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
@@ -35,7 +35,7 @@ self.addEventListener('push', (e) => {
     body: msg.body,
     icon: 'icons/icon-192.png',
     badge: 'icons/icon-192.png',
-    tag: 'appgym-supps',
+    tag: msg.tag || 'appgym-supps', // suplementos y membresía no se pisan entre sí
     renotify: true,
     data: { url: new URL(msg.url, self.registration.scope).href },
   }));

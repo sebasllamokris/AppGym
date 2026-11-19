@@ -105,6 +105,9 @@ export default {
             ? { date: body.date, ids: (Array.isArray(body.taken) ? body.taken : []).slice(0, 30).map((x) => String(x).slice(0, 64)) }
             : prev?.taken || { date: '', ids: [] },
           sent: prev?.sent || { date: '', ids: {} },
+          // membresía: { due, hour } o null. Si la app no la manda (versión vieja), se mantiene la anterior.
+          membership: 'membership' in body ? cleanMembership(body.membership) : prev?.membership || null,
+          memSent: prev?.memSent || '',
           lastSeen: now,
         };
         await putDevices(env, devices);
@@ -145,30 +148,51 @@ export default {
       const { date, time } = localNow(d.tz);
       if (d.sent.date !== date) d.sent = { date, ids: {} };
       const taken = d.taken.date === date ? d.taken.ids : [];
+      let gone = false;
+      const push = async (message) => {
+        const res = await sendPush(env, d.subscription, message);
+        if (res.status === 404 || res.status === 410) gone = true; // el celular canceló la suscripción
+        changed = true;
+        return res.ok;
+      };
 
+      // 1. Suplementos
       const due = d.supplements.filter((s) => {
         if (!s.time || s.time > time || taken.includes(s.id)) return false;
         const sent = d.sent.ids[s.id];
         return !sent || (sent.count < 2 && now - sent.last >= REPEAT_AFTER_MS);
       });
-      if (!due.length) continue;
-
-      const names = due.map((s) => (s.dose ? `${s.name} (${s.dose})` : s.name));
-      const res = await sendPush(env, d.subscription, {
-        title: '💊 Hora de tus suplementos',
-        body: `${names.join(' · ')}. Tocá para marcar${due.length > 1 ? 'los' : 'lo'} como tomado${due.length > 1 ? 's' : ''}.`,
-        url: `./?take=${due.map((s) => encodeURIComponent(s.id)).join(',')}`,
-      });
-
-      if (res.status === 404 || res.status === 410) {
-        delete devices[id]; // el celular canceló la suscripción
-      } else if (res.ok) {
-        for (const s of due) {
+      if (due.length) {
+        const names = due.map((s) => (s.dose ? `${s.name} (${s.dose})` : s.name));
+        const ok = await push({
+          title: '💊 Hora de tus suplementos',
+          body: `${names.join(' · ')}. Tocá para marcar${due.length > 1 ? 'los' : 'lo'} como tomado${due.length > 1 ? 's' : ''}.`,
+          url: `./?take=${due.map((s) => encodeURIComponent(s.id)).join(',')}`,
+          tag: 'appgym-supps',
+        });
+        if (ok) for (const s of due) {
           const prev = d.sent.ids[s.id];
           d.sent.ids[s.id] = { count: (prev?.count || 0) + 1, last: now };
         }
       }
-      changed = true;
+
+      // 2. Membresía: el día del vencimiento y una vez por día hasta que se marque como pagada
+      const m = d.membership;
+      if (!gone && m && m.due <= date && m.hour <= time && d.memSent !== date) {
+        const late = daysBetween(m.due, date);
+        const ok = await push({
+          title: late ? '💳 Membresía del gym vencida' : '💳 Hoy vence tu membresía del gym',
+          body: late
+            ? `Venció el ${fmtDay(m.due)} (hace ${late} ${late === 1 ? 'día' : 'días'}). Cuando pagues, tocá "Pagado" en la app.`
+            : 'Cuando pagues, tocá "Pagado" en la app para renovar la fecha.',
+          url: './?membership=1',
+          tag: 'appgym-membership',
+        });
+        console.log(`aviso membresía ${id.slice(0, 6)}… vence=${m.due} enviado=${ok}`);
+        if (ok) d.memSent = date;
+      }
+
+      if (gone) delete devices[id];
     }
     if (changed) await putDevices(env, devices);
   },
@@ -184,6 +208,16 @@ function cleanSupps(list) {
     id: String(s.id).slice(0, 64), name: String(s.name || '').slice(0, 60),
     dose: String(s.dose || '').slice(0, 30), time: /^\d{2}:\d{2}$/.test(s.time) ? s.time : '',
   })).filter((s) => s.name);
+}
+const isDate = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+function cleanMembership(m) {
+  if (!m || !isDate(m.due)) return null;
+  return { due: m.due, hour: /^\d{2}:\d{2}$/.test(m.hour) ? m.hour : '09:00' };
+}
+const daysBetween = (a, b) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
+function fmtDay(ds) {
+  try { return new Date(ds + 'T12:00:00Z').toLocaleDateString('es', { day: 'numeric', month: 'long', timeZone: 'UTC' }); }
+  catch { return ds; }
 }
 function validTz(tz) {
   try { new Intl.DateTimeFormat('en', { timeZone: tz }); return typeof tz === 'string'; } catch { return false; }
