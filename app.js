@@ -234,6 +234,81 @@ function weekCount() {
   const from = dateStr(monday);
   return [...activeDays()].filter((x) => x >= from).length;
 }
+function monthCount() {
+  const prefix = todayStr().slice(0, 7);
+  return [...activeDays()].filter((x) => x.startsWith(prefix)).length;
+}
+
+// ---------- Week Streak ----------
+const weekGoal = () => state.settings.weekGoal || 4;
+function mondayOf(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7)); }
+function weekDates(monday) {
+  return Array.from({ length: 7 }, (_, i) => dateStr(new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i)));
+}
+// Semanas seguidas cumpliendo el objetivo. La semana actual suma si ya lo cumpliste, pero no corta la racha mientras está en curso.
+function weekStreak() {
+  const days = activeDays(), goal = weekGoal();
+  const met = (mon) => weekDates(mon).filter((d) => days.has(d)).length >= goal;
+  const mon = mondayOf(new Date());
+  let n = met(mon) ? 1 : 0;
+  for (let w = new Date(mon); ; ) {
+    w.setDate(w.getDate() - 7);
+    if (!met(w)) break;
+    n++;
+  }
+  return n;
+}
+function weekStreakBlock() {
+  const today = todayStr(), days = activeDays(), goal = weekGoal();
+  const dates = weekDates(mondayOf(new Date()));
+  const done = dates.filter((d) => days.has(d)).length;
+  const ws = weekStreak();
+  return `<section class="week">
+    <div class="week-head">
+      <h1>Week Streak</h1>
+      <span class="streak-pill" title="Semanas seguidas cumpliendo tu objetivo">🔥 ${ws} ${ws === 1 ? 'semana' : 'semanas'}</span>
+    </div>
+    <div class="muted small">${done} de ${goal} días esta semana${done >= goal ? ' · ¡objetivo cumplido!' : ''}</div>
+    <div class="week-days">
+      ${dates.map((d, i) => {
+        const on = days.has(d), isToday = d === today, future = d > today;
+        return `<button class="wd ${on ? 'on' : ''} ${isToday ? 'today' : ''} ${future ? 'future' : ''}" data-action="day" data-d="${d}" aria-label="${esc(fmtLongDate(d))}${on ? ', entrenaste' : ''}">
+          <span class="wd-l">${'LMXJVSD'[i]}</span>
+          <span class="wd-c">${on ? '✓' : Number(d.slice(8))}</span>
+        </button>`;
+      }).join('')}
+    </div>
+    <div class="set-bar week-bar"><span style="width:${Math.min(100, Math.round((done / goal) * 100))}%"></span></div>
+  </section>`;
+}
+
+// ---------- Sugerencia del día ----------
+// Rotación según la última rutina: Push → Pull → Piernas → Push…
+const NEXT_ROUTINE = { push: 'pull', pull: 'legs', legs: 'push', upper: 'legs', full: 'full', arms: 'legs', cali: 'cali', plyo: 'upper', core: 'push' };
+function greeting() {
+  const h = new Date().getHours();
+  return h < 5 ? 'Buenas noches' : h < 12 ? 'Buenos días' : h < 20 ? 'Buenas tardes' : 'Buenas noches';
+}
+function suggestionCard() {
+  const today = todayStr();
+  const last = sessionsSorted().find((s) => s.type === 'gym' && s.routine && s.routine !== 'free');
+  const lastKey = last ? (last.routine === 'combo' ? last.types?.[last.types.length - 1] : last.routine) : null;
+  const next = (lastKey && NEXT_ROUTINE[lastKey]) || (last ? 'push' : 'full');
+  const r = ROUTINES[next];
+  const mins = estimateMinutes(generate(next));
+  const doneToday = last && last.date === today;
+  const ago = last ? daysBetween(last.date, today) : null;
+  const lastTxt = !last ? 'Ideal para arrancar' : ago === 0 ? `Hoy hiciste ${last.title} ✓` : ago === 1 ? `Último: ${last.title} ayer` : `Último: ${last.title} hace ${ago} días`;
+  return `<div class="card suggest">
+    <div class="muted small">${doneToday ? 'Para la próxima' : 'Hoy te toca'}</div>
+    <div class="suggest-name">${esc(r.name)}</div>
+    <div class="muted small">${esc(lastTxt)} · ~${mins} min</div>
+    <div class="suggest-actions">
+      <button class="btn primary" data-action="preview" data-r="${next}">Empezar</button>
+      <button class="btn ghost-line" data-action="goto-routines">Elegir otra</button>
+    </div>
+  </div>`;
+}
 // ---------- Suplementos ----------
 const takenOn = (date) => state.intake[date] || [];
 const isTaken = (id, date) => takenOn(date).includes(id);
@@ -464,17 +539,16 @@ function sessionRow(s) {
 
 function homeView() {
   const today = todayStr();
-  const didToday = state.sessions.some((s) => s.date === today);
   const recent = sessionsSorted().slice(0, 5);
   return `
-    <header>
-      <div class="eyebrow">${esc(fmtLongDate(today))}</div>
-      <h1>¿Qué toca hoy?</h1>
-      ${didToday ? '<div class="today-badge">✓ Hoy ya te moviste</div>' : ''}
+    <header class="home-head">
+      <div class="eyebrow">${esc(fmtLongDate(today))} · ${greeting()}</div>
     </header>
+    ${weekStreakBlock()}
+    ${suggestionCard()}
     <div class="stats">
       <div class="stat"><b>${streak()}</b><span>días de racha</span></div>
-      <div class="stat"><b>${weekCount()}</b><span>días esta semana</span></div>
+      <div class="stat"><b>${monthCount()}</b><span>días este mes</span></div>
       <div class="stat"><b>${state.sessions.length}</b><span>sesiones</span></div>
     </div>
     <h2 class="section section-row"><span>Suplementos de hoy</span><button class="link" data-action="edit-supps">Editar</button></h2>
@@ -484,7 +558,7 @@ function homeView() {
     </div>` : '<button class="btn ghost wide" data-action="edit-supps">+ Agregar suplementos</button>'}
     <h2 class="section section-row"><span>Membresía del gym</span>${state.membership ? '<button class="link" data-action="edit-membership">Editar</button>' : ''}</h2>
     ${membershipCard()}
-    <h2 class="section">Entrenar en el gym</h2>
+    <h2 class="section" id="routines">Entrenar en el gym</h2>
     <div class="routine-grid">
       ${Object.entries(ROUTINES).map(([k, r]) => `
         <button class="routine ${r.combo ? 'combo' : ''}" data-action="preview" data-r="${k}"><strong>${r.combo ? '🔀 ' : ''}${esc(r.name)}</strong><span>${esc(r.desc)}</span></button>`).join('')}
@@ -649,6 +723,12 @@ function settingsView() {
       <span>Descanso entre series</span>
       <select class="input" style="width:auto" data-setting="rest">
         ${[0, 45, 60, 90, 120, 150, 180, 240].map((s) => `<option value="${s}" ${s === r ? 'selected' : ''}>${s ? fmtClock(s * 1000) : 'Sin timer'}</option>`).join('')}
+      </select>
+    </div>
+    <div class="card setting-row">
+      <span>Objetivo semanal<div class="muted small">Para tu Week Streak</div></span>
+      <select class="input" style="width:auto" data-setting="weekGoal">
+        ${[2, 3, 4, 5, 6, 7].map((n) => `<option value="${n}" ${n === weekGoal() ? 'selected' : ''}>${n} días</option>`).join('')}
       </select>
     </div>
     ${pushSection()}
@@ -1054,6 +1134,7 @@ const actions = {
     try { await pushPost('/test', { id: state.push.deviceId }); toast('Enviada, debería llegar en segundos'); }
     catch (e) { toast('No se pudo enviar: ' + e.message); }
   },
+  'goto-routines'() { $('#routines')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); },
   'edit-membership'() { membershipSheet(); },
   'mem-save'() {
     const date = $('#mem-date').value, hour = $('#mem-hour').value || '09:00';
@@ -1168,6 +1249,7 @@ document.addEventListener('input', (ev) => {
 document.addEventListener('change', async (ev) => {
   const t = ev.target;
   if (t.dataset.setting === 'rest') { state.settings.rest = +t.value; save(); toast('Guardado'); }
+  if (t.dataset.setting === 'weekGoal') { state.settings.weekGoal = +t.value; save(); toast('Objetivo guardado'); }
   if (t.id === 'import-file' && t.files[0]) {
     try {
       const data = JSON.parse(await t.files[0].text());
