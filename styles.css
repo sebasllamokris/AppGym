@@ -1,10 +1,10 @@
 :root {
-  --bg: #092742;
-  --surface: #0e3255;
-  --surface-2: #153f68;
-  --line: #21507c;
+  --bg: #031322;        /* marino profundo de fondo */
+  --surface: #092742;   /* tarjetas: el azul de la paleta */
+  --surface-2: #0e3256; /* inputs y elementos sobre tarjetas */
+  --line: #1a3f63;
   --text: #FEFFFA;
-  --muted: #9bb3cb;
+  --muted: #8fa8c0;
   --accent: #D2FA00;
   --accent-ink: #092742;
   --sport: #4cc9f0;
@@ -29,7 +29,8 @@ button { cursor: pointer; }
 #app {
   max-width: 560px;
   margin: 0 auto;
-  padding: calc(16px + var(--safe-t)) 16px calc(96px + var(--safe-b));
+  /* aire extra debajo del notch / la barra de estado */
+  padding: calc(36px + var(--safe-t)) 16px calc(96px + var(--safe-b));
 }
 body.in-workout #app { padding-bottom: calc(120px + var(--safe-b)); }
 
@@ -301,7 +302,7 @@ textarea.input { min-height: 80px; resize: vertical; }
 .tabs {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
   display: grid; grid-template-columns: repeat(3, 1fr);
-  background: rgba(9,39,66,.92); backdrop-filter: blur(12px); border-top: 1px solid var(--line);
+  background: rgba(3,19,34,.94); backdrop-filter: blur(12px); border-top: 1px solid var(--line);
   padding: 6px 8px calc(6px + var(--safe-b));
 }
 .tabs button { border: 0; background: transparent; color: var(--muted); padding: 6px; font-size: 12px; display: flex; flex-direction: column; align-items: center; gap: 2px; }
