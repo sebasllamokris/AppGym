@@ -488,11 +488,11 @@ const EXERCISES = [
 // Formato del slot: [músculo, cantidad, tag opcional]
 const ROUTINES = {
   push: { name: 'Push', desc: 'Pecho, hombros y tríceps', slots: [['chest', 2], ['shoulders', 2], ['triceps', 2]] },
-  pull: { name: 'Pull', desc: 'Espalda y bíceps', slots: [['back', 3], ['rearDelts', 1], ['biceps', 2]] },
+  pull: { name: 'Pull', desc: 'Espalda, trapecio y bíceps', slots: [['back', 3], ['rearDelts', 1], ['traps', 1], ['biceps', 2]] },
   legs: { name: 'Piernas', desc: 'Cuádriceps, isquios, glúteos', slots: [['quads', 2], ['hamstrings', 2], ['glutes', 1], ['calves', 1]] },
   upper: { name: 'Torso', desc: 'Todo el tren superior', slots: [['chest', 2], ['back', 2], ['shoulders', 1], ['biceps', 1], ['triceps', 1]] },
   full: { name: 'Full Body', desc: 'Cuerpo completo', slots: [['quads', 1], ['chest', 1], ['back', 1], ['hamstrings', 1], ['shoulders', 1], ['core', 1]] },
-  arms: { name: 'Brazos', desc: 'Bíceps, tríceps y hombro', slots: [['biceps', 3], ['triceps', 3], ['shoulders', 1]] },
+  arms: { name: 'Brazos', desc: 'Bíceps, tríceps y antebrazo', slots: [['biceps', 3], ['triceps', 3], ['forearms', 1]] },
   cali: { name: 'Calistenia', desc: 'Solo peso corporal', slots: [['back', 2, 'cali'], ['chest', 1, 'cali'], ['shoulders', 1, 'cali'], ['triceps', 1, 'cali'], ['quads', 1, 'cali'], ['core', 2, 'cali']] },
   plyo: { name: 'Pliometría', desc: 'Saltos y potencia explosiva', slots: [['plyoLower', 4], ['plyoUpper', 2]] },
   core: { name: 'Core', desc: 'Abdomen y zona media', slots: [['core', 4]] },
