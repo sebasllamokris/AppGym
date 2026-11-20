@@ -256,6 +256,11 @@ h3 { font-size: 17px; margin: 0; }
 .step-btn { width: 44px; height: 44px; border: 0; border-radius: 10px; background: var(--surface-2); font-size: 22px; font-weight: 700; }
 .step-btn:active { background: var(--accent); color: var(--accent-ink); }
 .step-val { font-size: 26px; font-variant-numeric: tabular-nums; min-width: 40px; text-align: center; }
+.cat-chips { margin-bottom: 10px; }
+.cat-chip { display: inline-flex; align-items: center; gap: 6px; background: var(--surface-2); padding-right: 6px; }
+.cat-chip button { border: 0; background: rgba(254,255,250,.1); color: var(--text); width: 22px; height: 22px; border-radius: 50%; line-height: 1; font-size: 15px; padding: 0; }
+.cat-add { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.fut-steppers input.input { height: 52px; font-size: 22px; font-weight: 700; text-align: center; }
 .fut-card { border: 1px solid rgba(76,201,240,.35); }
 .fut-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
 .fut-nums { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; text-align: center; }

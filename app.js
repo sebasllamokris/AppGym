@@ -26,13 +26,28 @@ function load() {
   const base = { sessions: [], active: null, settings: { rest: 90 }, supplements: DEFAULT_SUPPS, intake: {}, push: { enabled: false }, membership: null, profile: null };
   try {
     const s = JSON.parse(localStorage.getItem(STORE_KEY));
-    if (s && Array.isArray(s.sessions)) { migrate(s.sessions); return { ...base, ...s }; }
+    if (s && Array.isArray(s.sessions)) {
+      migrate(s.sessions);
+      // quien ya tenía plan antes de existir "Tu deporte" seguía Soccer con estos torneos
+      if (s.profile && !('sport' in s.profile)) Object.assign(s.profile, { sport: 'Soccer', categories: ['Cente', 'Exa', 'Cyt', 'Casual'] });
+      return { ...base, ...s };
+    }
   } catch (e) { /* datos dañados o sin acceso */ }
   return base;
 }
-// Ajustes de datos viejos: los partidos de "Fútbol" ahora se llaman "Soccer"
+// Ajustes de datos viejos:
+// - los partidos de "Fútbol" ahora se llaman "Soccer"
+// - goals/assists/tournament sueltos pasan al formato genérico { stats, category }
 function migrate(sessions) {
-  for (const s of sessions) if (s && s.sport === 'Fútbol') s.sport = 'Soccer';
+  for (const s of sessions) {
+    if (!s) continue;
+    if (s.sport === 'Fútbol') s.sport = 'Soccer';
+    if (s.tournament !== undefined && !s.stats) {
+      s.stats = { goals: s.goals || 0, assists: s.assists || 0 };
+      s.category = s.tournament;
+      delete s.goals; delete s.assists; delete s.tournament;
+    }
+  }
   return sessions;
 }
 function save() {
@@ -80,8 +95,12 @@ function toast(msg, action) {
 
 // ---------- Generador de rutinas ----------
 // ---------- Tu plan de entrenamiento ----------
-const DEFAULT_PROFILE = { goal: 'muscle', level: 'intermediate', split: 'ppl', days: 4, custom: ['push', 'pull', 'legs'], extras: ['full', 'cali', 'plyo'] };
+const DEFAULT_PROFILE = { goal: 'muscle', level: 'intermediate', split: 'ppl', days: 4, custom: ['push', 'pull', 'legs'], extras: ['full', 'cali', 'plyo'], sport: null, categories: [] };
 const profile = () => ({ ...DEFAULT_PROFILE, ...(state.profile || {}) });
+// Deporte que se sigue con estadísticas (Ajustes → Tu plan → Tu deporte)
+const trackedSport = () => (SPORT_TRACKERS[profile().sport] ? profile().sport : null);
+const tracker = () => SPORT_TRACKERS[trackedSport()] || null;
+const sportCategories = () => (profile().categories?.length ? profile().categories : tracker()?.categories || []);
 // Rutinas que hay que completar en la semana según el estilo y los días
 function weekRequired() {
   const p = profile(), s = SPLITS[p.split] || SPLITS.ppl;
@@ -555,78 +574,123 @@ function routinePickerSheet() {
   `);
 }
 
-// ---------- Soccer: goles, asistencias y torneos ----------
-let futFilter = 'Todos';
-// Solo cuentan los partidos cargados con estadísticas (tienen torneo)
-const futMatches = (t = 'Todos') => sessionsSorted().filter((s) => s.type === 'activity' && s.sport === 'Soccer' && s.tournament && (t === 'Todos' || s.tournament === t));
-function futTotals(list) {
-  const g = list.reduce((n, s) => n + (s.goals || 0), 0), a = list.reduce((n, s) => n + (s.assists || 0), 0);
-  return { pj: list.length, g, a, ga: g + a };
-}
-const avg = (n, d) => (d ? (n / d).toFixed(2).replace(/\.?0+$/, '') : '0');
+// ---------- Deporte con estadísticas (el que elegiste en Tu plan → Tu deporte) ----------
+let sportFilter = 'Todos';
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const fmtNum = (n, dec = 2) => (Number.isFinite(n) ? n.toFixed(dec).replace(/\.?0+$/, '') : '0');
+const avg = (n, d) => (d ? fmtNum(n / d) : '0');
+const RESULTS = { W: 'Ganado', D: 'Empate', L: 'Perdido' };
+const fmtPace = (p) => (p ? `${Math.floor(p)}:${pad(Math.round((p % 1) * 60) % 60)}` : '—');
 
-function futCard() {
-  const t = futTotals(futMatches());
-  if (!t.pj) return `<button class="btn ghost wide fut-empty" data-action="log-activity" data-sport="Soccer">⚽ Registrá tu primer partido para ver tus stats</button>`;
+// Sesiones del deporte seguido que tienen estadísticas cargadas
+function sportSessions(cat = 'Todos') {
+  const sp = trackedSport();
+  if (!sp) return [];
+  return sessionsSorted().filter((s) => s.type === 'activity' && s.sport === sp && s.stats && (cat === 'Todos' || s.category === cat));
+}
+function sportTotals(list) {
+  const t = tracker(), sum = {};
+  for (const f of t.fields) sum[f.k] = list.reduce((n, s) => n + (num(s.stats[f.k]) || 0), 0);
+  const combo = t.combo ? t.combo.keys.reduce((n, k) => n + sum[k], 0) : null;
+  const res = { W: 0, D: 0, L: 0 };
+  list.forEach((s) => { if (s.result in res) res[s.result]++; });
+  const decided = res.W + res.D + res.L;
+  // ritmo y velocidad: solo sesiones con distancia en km y duración
+  const timed = list.filter((s) => num(s.minutes) > 0 && num(s.stats.km) > 0);
+  const km = timed.reduce((n, s) => n + num(s.stats.km), 0), min = timed.reduce((n, s) => n + num(s.minutes), 0);
+  const totalMin = list.reduce((n, s) => n + (num(s.minutes) || 0), 0);
+  return { n: list.length, sum, combo, res, decided, totalMin, pace: km ? min / km : null, speed: min ? km / (min / 60) : null };
+}
+// Texto corto con las estadísticas de una sesión (historial, calendario)
+function sessionStatsText(s, withCategory = true) {
+  const t = SPORT_TRACKERS[s.sport];
+  if (!t || !s.stats) return '';
+  const parts = t.fields.map((f) => (f.type === 'number' ? `${fmtNum(num(s.stats[f.k]))} ${f.unit}` : `${f.icon} ${s.stats[f.k] || 0} ${f.short}`));
+  if (RESULTS[s.result]) parts.push(RESULTS[s.result]);
+  if (withCategory && s.category) parts.push(s.category);
+  return parts.join(' · ');
+}
+
+function sportCard() {
+  const t = tracker(), sp = trackedSport();
+  if (!t) return '';
+  const tot = sportTotals(sportSessions());
+  if (!tot.n) return `<button class="btn ghost wide fut-empty" data-action="log-activity" data-sport="${esc(sp)}">${t.icon} Registrá tu primer ${t.unit} para ver tus stats</button>`;
+  const big = t.fields.slice(0, 2).map((f) => (f.type === 'number' ? [fmtNum(tot.sum[f.k], 1), `${f.unit} en total`] : [tot.sum[f.k], f.label.toLowerCase()]));
+  const p = t.fields[0];
+  if (t.combo) big.push([avg(tot.combo, tot.n), `${t.combo.label} por ${t.unit}`]);
+  else if (t.pace) big.push([fmtPace(tot.pace), 'ritmo (min/km)']);
+  else if (t.speed) big.push([tot.speed ? fmtNum(tot.speed, 1) : '—', 'km/h promedio']);
+  else if (p.type === 'count') big.push([avg(tot.sum[p.k], tot.n), `${p.short} por ${t.unit}`]);
+  if (big.length < 3) big.unshift(tot.totalMin ? [fmtNum(tot.totalMin / 60, 1), 'horas en total'] : [tot.n, t.units]);
   return `<div class="card fut-card">
-    <div class="fut-head"><b>⚽ Mis stats</b><span class="muted small">${t.pj} ${t.pj === 1 ? 'partido' : 'partidos'}</span></div>
-    <div class="fut-nums">
-      <div><b>${t.g}</b><span>goles</span></div>
-      <div><b>${t.a}</b><span>asistencias</span></div>
-      <div><b>${avg(t.ga, t.pj)}</b><span>G+A por partido</span></div>
-    </div>
+    <div class="fut-head"><b>${t.icon} Mis stats</b><span class="muted small">${tot.n} ${tot.n === 1 ? t.unit : t.units}</span></div>
+    <div class="fut-nums">${big.slice(0, 3).map(([v, l]) => `<div><b>${v}</b><span>${esc(l)}</span></div>`).join('')}</div>
     <div class="suggest-actions">
-      <button class="btn" data-action="fut-stats">Ver stats</button>
-      <button class="btn sport" data-action="log-activity" data-sport="Soccer">+ Partido</button>
+      <button class="btn" data-action="sport-stats">Ver stats</button>
+      <button class="btn sport" data-action="log-activity" data-sport="${esc(sp)}">+ ${cap(t.unit)}</button>
     </div>
   </div>`;
 }
 
-function futStatsSheet() {
-  const list = futMatches(futFilter), t = futTotals(list);
-  const withGoal = list.filter((s) => s.goals > 0).length;
-  // racha: partidos seguidos (los más recientes) con al menos un gol
-  let scoring = 0; for (const s of list) { if (s.goals > 0) scoring++; else break; }
-  const best = [...list].sort((a, b) => ((b.goals || 0) + (b.assists || 0)) - ((a.goals || 0) + (a.assists || 0)) || b.goals - a.goals)[0];
-  const byTour = TOURNAMENTS.map((k) => ({ k, ...futTotals(futMatches(k)) })).filter((r) => r.pj);
+function sportStatsSheet() {
+  const t = tracker(), sp = trackedSport();
+  if (!t) return;
+  const list = sportSessions(sportFilter), tot = sportTotals(list);
+  const p = t.fields[0];
+  const cats = sportCategories();
+  const tiles = [[tot.n, t.units]];
+  for (const f of t.fields) tiles.push(f.type === 'number' ? [fmtNum(tot.sum[f.k], 1), `${f.unit} en total`] : [tot.sum[f.k], f.label.toLowerCase()]);
+  if (t.combo) tiles.push([tot.combo, t.combo.label]);
+  for (const f of t.fields) tiles.push([f.type === 'number' ? fmtNum(tot.sum[f.k] / (tot.n || 1), 1) : avg(tot.sum[f.k], tot.n), `${f.type === 'number' ? f.unit : f.label.toLowerCase()} por ${t.unit}`]);
+  if (t.combo) tiles.push([avg(tot.combo, tot.n), `${t.combo.label} por ${t.unit}`]);
+  if (t.pace) tiles.push([fmtPace(tot.pace), 'ritmo (min/km)']);
+  if (t.speed) tiles.push([tot.speed ? fmtNum(tot.speed, 1) : '—', 'km/h promedio']);
+  if (t.result && tot.decided) {
+    tiles.push([`${Math.round((tot.res.W / tot.decided) * 100)}%`, 'victorias']);
+    tiles.push([t.draw ? `${tot.res.W}-${tot.res.D}-${tot.res.L}` : `${tot.res.W}-${tot.res.L}`, t.draw ? 'G - E - P' : 'G - P']);
+  }
+  if (p.type === 'count') {
+    let streak = 0; for (const s of list) { if (num(s.stats[p.k]) > 0) streak++; else break; }
+    const withIt = list.filter((s) => num(s.stats[p.k]) > 0).length;
+    tiles.push([`${tot.n ? Math.round((withIt / tot.n) * 100) : 0}%`, `${t.units} con ${p.label.toLowerCase()}`]);
+    tiles.push([streak, `racha con ${p.label.toLowerCase()}`]);
+  }
+  const score = (s) => (t.combo ? t.combo.keys.reduce((n, k) => n + num(s.stats[k]), 0) : num(s.stats[p.k]));
+  const best = [...list].sort((a, b) => score(b) - score(a))[0];
+  const byCat = cats.map((c) => ({ c, ...sportTotals(sportSessions(c)) })).filter((r) => r.n);
+  const lastCol = t.combo ? `${t.combo.label}/${t.unit[0].toUpperCase()}` : t.result ? '% G' : `${p.short}/${t.unit[0].toUpperCase()}`;
+  const lastVal = (r) => (t.combo ? avg(r.combo, r.n) : t.result ? (r.decided ? Math.round((r.res.W / r.decided) * 100) + '%' : '—') : avg(r.sum[p.k], r.n));
+  const shownFields = t.fields.slice(0, 2);
   openSheet(`
-    <h2>⚽ Mis stats de soccer</h2>
-    <div class="chips fut-filter">${['Todos', ...TOURNAMENTS].map((k) => `<button class="chip ${futFilter === k ? 'on' : ''}" data-action="fut-filter" data-v="${k}">${k}</button>`).join('')}</div>
-    ${!t.pj ? `<div class="empty">Todavía no hay partidos${futFilter === 'Todos' ? '' : ' en ' + esc(futFilter)}.</div>` : `
-    <div class="fut-grid">
-      <div class="stat"><b>${t.pj}</b><span>partidos</span></div>
-      <div class="stat"><b>${t.g}</b><span>goles</span></div>
-      <div class="stat"><b>${t.a}</b><span>asistencias</span></div>
-      <div class="stat"><b>${t.ga}</b><span>G+A</span></div>
-      <div class="stat"><b>${avg(t.g, t.pj)}</b><span>goles por partido</span></div>
-      <div class="stat"><b>${avg(t.a, t.pj)}</b><span>asist. por partido</span></div>
-      <div class="stat"><b>${Math.round((withGoal / t.pj) * 100)}%</b><span>partidos con gol</span></div>
-      <div class="stat"><b>${scoring}</b><span>racha marcando</span></div>
-    </div>
-    ${best && (best.goals || best.assists) ? `<h2 class="section">🏆 Mejor partido</h2>
-      <div class="card fut-best"><b>${best.goals || 0} goles · ${best.assists || 0} asistencias</b>
-        <div class="muted small">${esc(best.tournament)} · ${esc(fmtLongDate(best.date))}</div></div>` : ''}
-    ${futFilter === 'Todos' && byTour.length > 1 ? `<h2 class="section">Por torneo</h2>
+    <h2>${t.icon} Mis stats de ${esc(sp.toLowerCase())}</h2>
+    ${cats.length ? `<div class="chips fut-filter">${['Todos', ...cats].map((k) => `<button class="chip ${sportFilter === k ? 'on' : ''}" data-action="sport-filter" data-v="${esc(k)}">${esc(k)}</button>`).join('')}</div>` : ''}
+    ${!tot.n ? `<div class="empty">Todavía no hay ${t.units}${sportFilter === 'Todos' ? '' : ' en ' + esc(sportFilter)}.</div>` : `
+    <div class="fut-grid">${tiles.map(([v, l]) => `<div class="stat"><b>${v}</b><span>${esc(l)}</span></div>`).join('')}</div>
+    ${best && score(best) > 0 ? `<h2 class="section">🏆 Mejor ${t.unit}</h2>
+      <div class="card fut-best"><b>${esc(sessionStatsText(best, false))}</b>
+        <div class="muted small">${esc(best.category || '')}${best.category ? ' · ' : ''}${esc(fmtLongDate(best.date))}</div></div>` : ''}
+    ${sportFilter === 'Todos' && byCat.length > 1 ? `<h2 class="section">Por ${esc(t.category.toLowerCase())}</h2>
       <div class="card fut-table">
-        <div class="fut-tr hdr"><span>Torneo</span><span>PJ</span><span>G</span><span>A</span><span>G+A/PJ</span></div>
-        ${byTour.map((r) => `<div class="fut-tr"><span>${esc(r.k)}</span><span>${r.pj}</span><span>${r.g}</span><span>${r.a}</span><span>${avg(r.ga, r.pj)}</span></div>`).join('')}
+        <div class="fut-tr hdr"><span>${esc(t.category)}</span><span>PJ</span>${shownFields.map((f) => `<span>${esc(f.short)}</span>`).join('')}${shownFields.length < 2 ? '<span></span>' : ''}<span>${esc(lastCol)}</span></div>
+        ${byCat.map((r) => `<div class="fut-tr"><span>${esc(r.c)}</span><span>${r.n}</span>${shownFields.map((f) => `<span>${f.type === 'number' ? fmtNum(r.sum[f.k], 1) : r.sum[f.k]}</span>`).join('')}${shownFields.length < 2 ? '<span></span>' : ''}<span>${lastVal(r)}</span></div>`).join('')}
       </div>` : ''}
-    <h2 class="section">Últimos partidos</h2>
+    <h2 class="section">Últimos ${t.units}</h2>
     <div class="card fut-table">
       ${list.slice(0, 8).map((s) => `<button class="fut-match" data-action="day" data-d="${s.date}">
-        <span><b>${esc(s.tournament)}</b><span class="muted small"> · ${esc(fmtShortDate(s.date))}</span></span>
-        <span class="fut-ga">⚽ ${s.goals || 0} &nbsp; 🅰️ ${s.assists || 0}</span></button>`).join('')}
+        <span><b>${esc(s.category || cap(t.unit))}</b><span class="muted small"> · ${esc(fmtShortDate(s.date))}</span></span>
+        <span class="fut-ga">${esc(sessionStatsText(s, false))}</span></button>`).join('')}
     </div>`}
     <div class="sheet-actions">
       <button class="btn" data-action="close-sheet">Cerrar</button>
-      <button class="btn sport" data-action="log-activity" data-sport="Soccer">+ Partido</button>
+      <button class="btn sport" data-action="log-activity" data-sport="${esc(sp)}">+ ${cap(t.unit)}</button>
     </div>
   `);
 }
 
 // ---------- Cuestionario: tu plan de entrenamiento ----------
 let planDraft = null, planStep = 0, planFirstRun = false;
-const PLAN_STEPS = ['Objetivo', 'Nivel', 'Estilo de rutina', 'Tu semana'];
+const PLAN_STEPS = ['Objetivo', 'Nivel', 'Estilo de rutina', 'Tu semana', 'Tu deporte'];
 
 function planSummary(p = profile()) {
   const req = (SPLITS[p.split]?.week ? SPLITS[p.split].week(p.days) : p.custom).map((k) => ROUTINES[k]?.name).filter(Boolean);
@@ -656,6 +720,15 @@ function planSheet() {
     body = `<p class="sub">¿Cómo organizás tu semana?</p>
       ${Object.entries(SPLITS).map(([k, s]) => planOption('split', k, s.name, s.desc)).join('')}
       ${d.split === 'custom' ? `<h2 class="section">Rutinas de tu semana</h2>${planChips('custom', COMBINABLE)}` : ''}`;
+  } else if (step === 4) {
+    const t = SPORT_TRACKERS[d.sport];
+    body = `<p class="sub">¿Practicás un deporte del que quieras llevar estadísticas?</p>
+      ${Object.entries(SPORT_TRACKERS).map(([name, tr]) => planOption('sport', name, `${tr.icon} ${name}`, tr.fields.map((f) => f.label).join(', ') + (tr.result ? ', resultado' : '') + (tr.pace ? ', ritmo' : '') + (tr.speed ? ', velocidad' : ''))).join('')}
+      ${planOption('sport', '', 'Ninguno', 'Solo registro actividades sin estadísticas')}
+      ${t ? `<h2 class="section">Tus ${esc(t.category.toLowerCase())}s</h2>
+        <p class="muted small" style="margin:-4px 0 10px">${t.category === 'Torneo' ? 'Agregá los torneos o ligas en los que jugás' : `Agregá tus ${esc(t.category.toLowerCase())}s`}, así podés ver tus stats por cada uno.</p>
+        <div class="chips cat-chips">${d.categories.map((c, i) => `<span class="chip cat-chip">${esc(c)}<button data-action="plan-cat-del" data-i="${i}" aria-label="Quitar ${esc(c)}">×</button></span>`).join('') || '<span class="muted small">Todavía no agregaste ninguno</span>'}</div>
+        <div class="cat-add"><input class="input" id="plan-cat" maxlength="24" placeholder="${t.category === 'Torneo' ? 'Ej: Liga del barrio' : 'Nombre'}"><button class="btn" data-action="plan-cat-add">Agregar</button></div>` : ''}`;
   } else {
     const req = SPLITS[d.split].week ? SPLITS[d.split].week(d.days) : d.custom;
     const extraKeys = EXTRA_OPTIONS.filter((k) => !req.includes(k));
@@ -684,6 +757,8 @@ function planSheet() {
 }
 function openPlan(firstRun = false) {
   planDraft = JSON.parse(JSON.stringify(profile()));
+  if (planDraft.sport === null) planDraft.sport = '';
+  if (planDraft.sport && !planDraft.categories.length) planDraft.categories = [...(SPORT_TRACKERS[planDraft.sport]?.categories || [])];
   planStep = 0; planFirstRun = firstRun;
   planSheet();
 }
@@ -708,8 +783,8 @@ function handleTakeLink() {
 
 function sessionSummary(s) {
   if (s.type === 'activity') {
-    const fut = s.sport === 'Soccer' && s.tournament ? [`⚽ ${s.goals || 0} G`, `🅰️ ${s.assists || 0} A`, s.tournament] : [];
-    return [...fut, s.minutes ? `${s.minutes} min` : '', !fut.length && s.intensity ? `intensidad ${s.intensity}` : ''].filter(Boolean).join(' · ');
+    const st = sessionStatsText(s);
+    return [st, s.minutes ? `${s.minutes} min` : '', !st && s.intensity ? `intensidad ${s.intensity}` : ''].filter(Boolean).join(' · ');
   }
   const sets = s.exercises.reduce((a, e) => a + e.sets.length, 0);
   const vol = s.exercises.reduce((a, e) => a + e.sets.reduce((b, x) => b + num(x.w) * num(x.r), 0), 0);
@@ -768,8 +843,7 @@ function homeView() {
     <div class="home-actions">
       <button class="btn sport wide" data-action="log-activity">+ Registrar deporte o actividad</button>
     </div>
-    <h2 class="section">Soccer</h2>
-    ${futCard()}
+    ${trackedSport() ? `<h2 class="section">${esc(trackedSport())}</h2>${sportCard()}` : ''}
     <h2 class="section">Últimas sesiones</h2>
     ${recent.length ? recent.map(sessionRow).join('') : '<div class="empty">Todavía no registraste nada. ¡Elegí una rutina y arrancá!</div>'}
   `;
@@ -932,6 +1006,7 @@ function settingsView() {
         <div class="plan-row"><span class="muted small">Días</span><b>${state.profile.days} por semana</b></div>
         <div class="plan-row"><span class="muted small">Objetivo</span><b>${esc(s.goal)}</b></div>
         <div class="plan-row"><span class="muted small">Nivel</span><b>${esc(s.level)}</b></div>
+        <div class="plan-row"><span class="muted small">Deporte</span><b>${trackedSport() ? `${tracker().icon} ${esc(trackedSport())}${sportCategories().length ? ' · ' + esc(sportCategories().join(', ')) : ''}` : 'Ninguno'}</b></div>
       </button>`;
     })()}
     <h2 class="section">Entrenamiento</h2>
@@ -1046,26 +1121,33 @@ function pickerSheet() {
 
 function activitySheet() {
   const a = activityDraft;
-  const match = a.sport === 'Soccer'; // desde la sección Soccer: formulario de partido
+  const sp = trackedSport(), t = tracker();
+  const match = !!sp && a.sport === sp; // desde la sección del deporte: formulario con estadísticas
+  const cats = sportCategories();
   openSheet(`
-    <h2>${match ? '⚽ Registrar partido' : 'Registrar actividad'}</h2>
-    <div class="sub">${match ? 'Cargá tus goles, asistencias y el torneo' : 'Deportes, cardio o cualquier movimiento del día'}</div>
+    <h2>${match ? `${t.icon} Registrar ${t.unit}` : 'Registrar actividad'}</h2>
+    <div class="sub">${match ? `Cargá tus estadísticas de ${esc(sp.toLowerCase())}` : 'Deportes, cardio o cualquier movimiento del día'}</div>
     ${match ? '' : `<label class="field"><span>¿Qué hiciste?</span>
-      <div class="chips">${SPORTS.filter((s) => s !== 'Soccer').map((s) => `<button class="chip ${a.sport === s ? 'on' : ''}" data-action="act-sport" data-v="${esc(s)}">${esc(s)}</button>`).join('')}</div>
+      <div class="chips">${SPORTS.filter((s) => s !== sp).map((s) => `<button class="chip ${a.sport === s ? 'on' : ''}" data-action="act-sport" data-v="${esc(s)}">${esc(s)}</button>`).join('')}</div>
     </label>`}
     ${a.sport === 'Otro' ? `<label class="field"><span>Nombre</span><input class="input" id="act-other" value="${esc(a.other)}" placeholder="Ej: escalada"></label>` : ''}
-    ${a.sport === 'Soccer' ? `<div class="card fut-form">
-      <label class="field"><span>Torneo</span>
-        <div class="seg fut-tour">${TOURNAMENTS.map((t) => `<button class="chip ${a.tournament === t ? 'on' : ''}" data-action="act-tour" data-v="${t}">${t}</button>`).join('')}</div>
-      </label>
+    ${match ? `<div class="card fut-form">
+      ${cats.length ? `<label class="field"><span>${esc(t.category)}</span>
+        <div class="chips">${cats.map((c) => `<button class="chip ${a.category === c ? 'on' : ''}" data-action="act-cat" data-v="${esc(c)}">${esc(c)}</button>`).join('')}</div>
+      </label>` : ''}
+      ${t.result ? `<label class="field"><span>Resultado (opcional)</span>
+        <div class="seg">${Object.entries(RESULTS).filter(([k]) => t.draw || k !== 'D').map(([k, l]) => `<button class="chip ${a.result === k ? 'on' : ''}" data-action="act-res" data-v="${k}">${l}</button>`).join('')}</div>
+      </label>` : ''}
       <div class="fut-steppers">
-        ${[['goals', '⚽ Goles'], ['assists', '🅰️ Asistencias']].map(([f, label]) => `
-          <div class="stepper"><span class="muted small">${label}</span>
+        ${t.fields.map((f) => f.type === 'count' ? `
+          <div class="stepper"><span class="muted small">${f.icon} ${esc(f.label)}</span>
             <div class="stepper-row">
-              <button class="step-btn" data-action="act-step" data-f="${f}" data-d="-1" aria-label="Restar">−</button>
-              <b class="step-val">${a[f]}</b>
-              <button class="step-btn" data-action="act-step" data-f="${f}" data-d="1" aria-label="Sumar">+</button>
-            </div></div>`).join('')}
+              <button class="step-btn" data-action="act-step" data-f="${f.k}" data-d="-1" aria-label="Restar">−</button>
+              <b class="step-val">${a.stats[f.k] || 0}</b>
+              <button class="step-btn" data-action="act-step" data-f="${f.k}" data-d="1" aria-label="Sumar">+</button>
+            </div></div>` : `
+          <label class="stepper"><span class="muted small">${f.icon} ${esc(f.label)} (${f.unit})</span>
+            <input class="input" id="act-f-${f.k}" inputmode="decimal" value="${esc(a.stats[f.k] ?? '')}" placeholder="0"></label>`).join('')}
       </div>
     </div>` : ''}
     <label class="field"><span>Fecha</span><input class="input" type="date" id="act-date" value="${a.date}" max="${todayStr()}"></label>
@@ -1087,6 +1169,10 @@ function readActivityInputs() {
   if ($('#act-min')) a.minutes = $('#act-min').value;
   if ($('#act-notes')) a.notes = $('#act-notes').value;
   if ($('#act-other')) a.other = $('#act-other').value;
+  for (const f of SPORT_TRACKERS[a.sport]?.fields || []) {
+    const el = $(`#act-f-${f.k}`);
+    if (el) a.stats[f.k] = el.value.replace(',', '.');
+  }
 }
 
 let openDay = null; // día abierto en la hoja, para refrescarla
@@ -1099,7 +1185,7 @@ function daySheet(ds) {
     ${list.map((s) => `
       <div class="card" style="background:var(--surface-2)">
         <div class="ex-head" style="margin-bottom:4px">
-          <div><h3>${s.type === 'gym' ? '🏋️ ' + esc(s.title) : '⚡ ' + esc(s.sport)}</h3>
+          <div><h3>${s.type === 'gym' ? '🏋️ ' + esc(s.title) : (SPORT_TRACKERS[s.sport]?.icon || '⚡') + ' ' + esc(s.sport)}</h3>
           <div class="muted small">${esc(sessionSummary(s))}</div></div>
           <button class="icon-btn" data-action="del-session" data-id="${s.id}" aria-label="Borrar">🗑</button>
         </div>
@@ -1333,7 +1419,13 @@ const actions = {
   'rest-skip'() { stopRest(); },
 
   'log-activity'(el) {
-    activityDraft = { sport: el.dataset.sport || '', other: '', date: el.dataset.d || todayStr(), minutes: '', intensity: 'media', notes: '', goals: 0, assists: 0, tournament: 'Casual' };
+    const sport = el.dataset.sport || '';
+    const t = sport && sport === trackedSport() ? tracker() : null;
+    activityDraft = {
+      sport, other: '', date: el.dataset.d || todayStr(), minutes: '', intensity: 'media', notes: '',
+      stats: Object.fromEntries((t?.fields || []).map((f) => [f.k, f.type === 'count' ? 0 : ''])),
+      category: t ? sportCategories()[0] || '' : '', result: '',
+    };
     activitySheet();
   },
   'act-sport'(el) { readActivityInputs(); activityDraft.sport = el.dataset.v; activitySheet(); },
@@ -1344,18 +1436,24 @@ const actions = {
     const sport = a.sport === 'Otro' ? (a.other.trim() || 'Otra actividad') : a.sport;
     if (!sport) return toast('Elegí qué actividad hiciste');
     const entry = { id: uid(), type: 'activity', date: a.date, start: Date.now(), sport, minutes: num(a.minutes) || '', intensity: a.intensity, notes: a.notes.trim() };
-    if (sport === 'Soccer') Object.assign(entry, { goals: a.goals, assists: a.assists, tournament: a.tournament });
+    const t = sport === trackedSport() ? tracker() : null;
+    if (t) {
+      entry.stats = Object.fromEntries(t.fields.map((f) => [f.k, num(a.stats[f.k]) || 0]));
+      if (a.category) entry.category = a.category;
+      if (a.result) entry.result = a.result;
+    }
     state.sessions.push(entry);
     save(); closeSheet(); render();
-    toast(sport === 'Soccer' && (a.goals || a.assists) ? `⚽ Partido guardado · ${a.goals} G · ${a.assists} A` : '⚡ Actividad registrada');
+    toast(t ? `${t.icon} Guardado · ${sessionStatsText(entry, false)}` : '⚡ Actividad registrada');
   },
-  'fut-stats'() { futFilter = 'Todos'; futStatsSheet(); },
-  'fut-filter'(el) { futFilter = el.dataset.v; futStatsSheet(); },
-  'act-tour'(el) { readActivityInputs(); activityDraft.tournament = el.dataset.v; activitySheet(); },
+  'sport-stats'() { sportFilter = 'Todos'; sportStatsSheet(); },
+  'sport-filter'(el) { sportFilter = el.dataset.v; sportStatsSheet(); },
+  'act-cat'(el) { readActivityInputs(); activityDraft.category = el.dataset.v; activitySheet(); },
+  'act-res'(el) { readActivityInputs(); activityDraft.result = activityDraft.result === el.dataset.v ? '' : el.dataset.v; activitySheet(); },
   'act-step'(el) {
     readActivityInputs();
     const f = el.dataset.f;
-    activityDraft[f] = Math.max(0, Math.min(30, activityDraft[f] + +el.dataset.d));
+    activityDraft.stats[f] = Math.max(0, Math.min(200, (activityDraft.stats[f] || 0) + +el.dataset.d));
     activitySheet();
   },
 
@@ -1376,9 +1474,22 @@ const actions = {
   'plan-open'() { openPlan(false); },
   'plan-pick'(el) {
     const f = el.dataset.f;
+    const prevSport = planDraft.sport;
     planDraft[f] = f === 'days' ? +el.dataset.v : el.dataset.v;
+    // al cambiar de deporte, arrancar con sus categorías de ejemplo
+    if (f === 'sport' && planDraft.sport !== prevSport) planDraft.categories = [...(SPORT_TRACKERS[planDraft.sport]?.categories || [])];
     planSheet();
   },
+  'plan-cat-add'() {
+    const input = $('#plan-cat'), v = input.value.trim();
+    if (!v) return toast('Escribí un nombre');
+    if (planDraft.categories.some((c) => c.toLowerCase() === v.toLowerCase())) return toast('Ya está en la lista');
+    if (planDraft.categories.length >= 12) return toast('Máximo 12');
+    planDraft.categories.push(v);
+    planSheet();
+    $('#plan-cat')?.focus();
+  },
+  'plan-cat-del'(el) { planDraft.categories.splice(+el.dataset.i, 1); planSheet(); },
   'plan-toggle'(el) {
     const list = planDraft[el.dataset.f], v = el.dataset.v;
     if (list.includes(v)) list.splice(list.indexOf(v), 1); else list.push(v);
@@ -1499,6 +1610,11 @@ document.addEventListener('click', (ev) => {
   if (el && actions[el.dataset.action]) { ev.preventDefault(); actions[el.dataset.action](el); }
 });
 
+// Enter en el campo de torneos/categorías los agrega
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Enter' && ev.target.id === 'plan-cat') { ev.preventDefault(); actions['plan-cat-add'](); }
+});
+
 document.addEventListener('input', (ev) => {
   const t = ev.target;
   if (t.id === 'pick-q') {
@@ -1543,7 +1659,10 @@ document.addEventListener('change', async (ev) => {
       }
       if (data.settings && typeof data.settings === 'object') state.settings = { ...state.settings, ...data.settings };
       if (!state.membership && data.membership?.lastPaid) state.membership = data.membership;
-      if (!state.profile && data.profile?.split) state.profile = data.profile;
+      if (!state.profile && data.profile?.split) {
+        state.profile = data.profile;
+        if (!('sport' in state.profile)) Object.assign(state.profile, { sport: 'Soccer', categories: ['Cente', 'Exa', 'Cyt', 'Casual'] });
+      }
       for (const [d, ids] of Object.entries(data.intake || {})) {
         if (Array.isArray(ids)) state.intake[d] = [...new Set([...takenOn(d), ...ids])];
       }

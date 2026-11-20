@@ -528,6 +528,7 @@ const SPLITS = {
   bro: { name: 'Un grupo por día', desc: 'Pecho, espalda, piernas, hombros y brazos', week: () => ['chest', 'back', 'legs', 'shoulders', 'arms'] },
   custom: { name: 'Personalizado', desc: 'Elegís vos las rutinas de tu semana', week: null },
 };
+// (el paso "Tu deporte" usa SPORT_TRACKERS, definido más abajo)
 // Rutinas que se pueden sumar como extra cuando completás la semana
 const EXTRA_OPTIONS = ['full', 'cali', 'plyo', 'core', 'arms'];
 
@@ -586,7 +587,38 @@ const WARMUP_PLANS = {
 };
 const WARMUP_MAX_STEPS = 6; // sin contar cardio ni series de aproximación
 
-// Torneos de soccer para las estadísticas de goles y asistencias
-const TOURNAMENTS = ['Cente', 'Exa', 'Cyt', 'Casual'];
+// ---------- Deporte que el usuario sigue con estadísticas ----------
+// fields: estadísticas de cada partido/sesión
+//   type 'count'  → contador con − y + (goles, puntos…)
+//   type 'number' → número con decimales (km, metros)
+// category: cómo se llaman las categorías (el usuario carga las suyas: torneos, ligas, tipos de salida…)
+// result: tiene resultado ganado/empate/perdido (draw: si existe el empate)
+// combo: suma de campos que se muestra como total (ej. G+A)
+// pace / speed: calcula ritmo (min/km) o velocidad (km/h) con la duración
+const SPORT_TRACKERS = {
+  'Soccer': { icon: '⚽', unit: 'partido', units: 'partidos', category: 'Torneo', categories: ['Liga', 'Amistoso', 'Casual'],
+    fields: [{ k: 'goals', label: 'Goles', short: 'G', icon: '⚽', type: 'count' }, { k: 'assists', label: 'Asistencias', short: 'A', icon: '🅰️', type: 'count' }],
+    combo: { label: 'G+A', keys: ['goals', 'assists'] }, result: true, draw: true },
+  'Básquet': { icon: '🏀', unit: 'partido', units: 'partidos', category: 'Torneo', categories: ['Liga', 'Amistoso', 'Casual'],
+    fields: [{ k: 'points', label: 'Puntos', short: 'PTS', icon: '🏀', type: 'count' }, { k: 'rebounds', label: 'Rebotes', short: 'REB', icon: '🖐️', type: 'count' }, { k: 'assists', label: 'Asistencias', short: 'AST', icon: '🤝', type: 'count' }],
+    result: true, draw: false },
+  'Vóley': { icon: '🏐', unit: 'partido', units: 'partidos', category: 'Torneo', categories: ['Liga', 'Amistoso', 'Casual'],
+    fields: [{ k: 'points', label: 'Puntos', short: 'PTS', icon: '🏐', type: 'count' }, { k: 'aces', label: 'Aces', short: 'ACE', icon: '🎯', type: 'count' }, { k: 'blocks', label: 'Bloqueos', short: 'BLQ', icon: '🧱', type: 'count' }],
+    result: true, draw: false },
+  'Tenis': { icon: '🎾', unit: 'partido', units: 'partidos', category: 'Torneo', categories: ['Torneo', 'Amistoso'],
+    fields: [{ k: 'setsWon', label: 'Sets ganados', short: 'SG', icon: '✅', type: 'count' }, { k: 'setsLost', label: 'Sets perdidos', short: 'SP', icon: '❌', type: 'count' }],
+    result: true, draw: false },
+  'Pádel': { icon: '🎾', unit: 'partido', units: 'partidos', category: 'Torneo', categories: ['Torneo', 'Amistoso'],
+    fields: [{ k: 'setsWon', label: 'Sets ganados', short: 'SG', icon: '✅', type: 'count' }, { k: 'setsLost', label: 'Sets perdidos', short: 'SP', icon: '❌', type: 'count' }],
+    result: true, draw: false },
+  'Correr': { icon: '🏃', unit: 'carrera', units: 'carreras', category: 'Tipo', categories: ['Rodaje', 'Series', 'Fondo', 'Competencia'],
+    fields: [{ k: 'km', label: 'Distancia', short: 'km', icon: '📏', type: 'number', unit: 'km', step: 0.1 }], pace: true },
+  'Ciclismo': { icon: '🚴', unit: 'salida', units: 'salidas', category: 'Tipo', categories: ['Ruta', 'Montaña', 'Rodillo'],
+    fields: [{ k: 'km', label: 'Distancia', short: 'km', icon: '📏', type: 'number', unit: 'km', step: 0.1 }], speed: true },
+  'Natación': { icon: '🏊', unit: 'sesión', units: 'sesiones', category: 'Estilo', categories: ['Libre', 'Pecho', 'Espalda', 'Combinado'],
+    fields: [{ k: 'meters', label: 'Distancia', short: 'm', icon: '📏', type: 'number', unit: 'm', step: 50 }] },
+  'Artes marciales': { icon: '🥋', unit: 'combate', units: 'combates', category: 'Competencia', categories: ['Torneo', 'Sparring'],
+    fields: [{ k: 'rounds', label: 'Rounds', short: 'R', icon: '🔔', type: 'count' }], result: true, draw: true },
+};
 
 const SPORTS = ['Soccer', 'Correr', 'Caminata', 'Ciclismo', 'Natación', 'Pádel', 'Tenis', 'Básquet', 'Vóley', 'Yoga / Movilidad', 'Artes marciales', 'Otro'];
