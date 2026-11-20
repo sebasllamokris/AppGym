@@ -533,7 +533,7 @@ function membershipCard() {
     <div class="muted small" style="margin:8px 0 12px">Último pago: ${esc(fmtDay(state.membership.lastPaid))}</div>
     ${st.isDue
       ? '<button class="btn primary wide" data-action="mem-paid">Renovar</button>'
-      : `<div class="mem-active"><span>✓ Activo</span><span class="muted small">hasta el ${esc(fmtDay(st.due))}</span></div>`}
+      : '<div class="mem-active">Activo</div>'}
     ${!state.push.enabled ? '<p class="muted small" style="margin:10px 0 0">🔔 Activá los recordatorios en Ajustes para recibir el aviso de vencimiento.</p>' : ''}
   </div>`;
 }
