@@ -586,4 +586,7 @@ const WARMUP_PLANS = {
 };
 const WARMUP_MAX_STEPS = 6; // sin contar cardio ni series de aproximación
 
+// Torneos de fútbol para las estadísticas de goles y asistencias
+const TOURNAMENTS = ['Cente', 'Exa', 'Cyt', 'Casual'];
+
 const SPORTS = ['Fútbol', 'Correr', 'Caminata', 'Ciclismo', 'Natación', 'Pádel', 'Tenis', 'Básquet', 'Vóley', 'Yoga / Movilidad', 'Artes marciales', 'Otro'];

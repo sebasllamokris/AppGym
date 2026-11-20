@@ -239,6 +239,34 @@ h3 { font-size: 17px; margin: 0; }
 .plan-row { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
 .plan-row b { text-align: right; font-size: 15px; }
 
+/* Fútbol */
+.fut-form { background: var(--surface-2); margin-bottom: 14px; }
+.fut-form .field { margin-bottom: 12px; }
+.seg.fut-tour { grid-template-columns: repeat(4, 1fr); }
+.fut-steppers { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.stepper { display: grid; gap: 6px; }
+.stepper-row { display: flex; align-items: center; justify-content: space-between; background: var(--surface); border-radius: 12px; padding: 4px; }
+.step-btn { width: 44px; height: 44px; border: 0; border-radius: 10px; background: var(--surface-2); font-size: 22px; font-weight: 700; }
+.step-btn:active { background: var(--accent); color: var(--accent-ink); }
+.step-val { font-size: 26px; font-variant-numeric: tabular-nums; min-width: 40px; text-align: center; }
+.fut-card { border: 1px solid rgba(76,201,240,.35); }
+.fut-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+.fut-nums { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; text-align: center; }
+.fut-nums b { display: block; font-size: 28px; font-variant-numeric: tabular-nums; color: var(--sport); }
+.fut-nums span { color: var(--muted); font-size: 12px; }
+.fut-filter { margin: 6px 0 14px; }
+.fut-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.fut-grid .stat { background: var(--surface-2); }
+.fut-grid .stat b { color: var(--sport); }
+.fut-best { background: var(--surface-2); display: grid; gap: 4px; }
+.fut-table { background: var(--surface-2); padding: 6px 12px; }
+.fut-tr { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1.4fr; gap: 6px; padding: 9px 0; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.fut-tr span:not(:first-child) { text-align: center; }
+.fut-tr.hdr { color: var(--muted); font-size: 12px; font-weight: 700; }
+.fut-tr:last-child, .fut-match:last-child { border-bottom: 0; }
+.fut-match { display: flex; justify-content: space-between; align-items: center; width: 100%; border: 0; background: none; padding: 11px 0; border-bottom: 1px solid var(--line); text-align: left; }
+.fut-ga { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
 /* Membresía */
 .membership { border: 1px solid var(--line); }
 .mem-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 10px; }
