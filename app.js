@@ -539,6 +539,22 @@ function membershipSheet() {
   `);
 }
 
+// ---------- Elegir otra rutina ----------
+function routinePickerSheet() {
+  const suggested = weekPlan().next;
+  openSheet(`
+    <h2>Elegir rutina</h2>
+    <div class="sub">Tocá una para ver los ejercicios antes de empezar</div>
+    <div class="routine-grid">
+      ${Object.entries(ROUTINES).map(([k, r]) => `
+        <button class="routine ${r.combo ? 'combo' : ''} ${k === suggested ? 'suggested' : ''}" data-action="preview" data-r="${k}">
+          ${k === suggested ? '<em class="sug-badge">Sugerida</em>' : ''}
+          <strong>${r.combo ? '🔀 ' : ''}${esc(r.name)}</strong><span>${esc(r.desc)}</span>
+        </button>`).join('')}
+    </div>
+  `);
+}
+
 // ---------- Soccer: goles, asistencias y torneos ----------
 let futFilter = 'Todos';
 // Solo cuentan los partidos cargados con estadísticas (tienen torneo)
@@ -748,11 +764,7 @@ function homeView() {
     </div>` : '<button class="btn ghost wide" data-action="edit-supps">+ Agregar suplementos</button>'}
     <h2 class="section section-row"><span>Membresía del gym</span>${state.membership ? '<button class="link" data-action="edit-membership">Editar</button>' : ''}</h2>
     ${membershipCard()}
-    <h2 class="section" id="routines">Entrenar en el gym</h2>
-    <div class="routine-grid">
-      ${Object.entries(ROUTINES).map(([k, r]) => `
-        <button class="routine ${r.combo ? 'combo' : ''}" data-action="preview" data-r="${k}"><strong>${r.combo ? '🔀 ' : ''}${esc(r.name)}</strong><span>${esc(r.desc)}</span></button>`).join('')}
-    </div>
+    <h2 class="section">Deportes y actividad</h2>
     <div class="home-actions">
       <button class="btn sport wide" data-action="log-activity">+ Registrar deporte o actividad</button>
     </div>
@@ -1393,7 +1405,7 @@ const actions = {
     save(); closeSheet();
     toast('Podés armar tu plan cuando quieras en Ajustes');
   },
-  'goto-routines'() { $('#routines')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); },
+  'goto-routines'() { routinePickerSheet(); },
   'edit-membership'() { membershipSheet(); },
   'mem-save'() {
     const date = $('#mem-date').value, hour = $('#mem-hour').value || '09:00';
