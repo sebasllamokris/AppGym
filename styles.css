@@ -206,6 +206,10 @@ h3 { font-size: 17px; margin: 0; }
 
 /* Sugerencia del día */
 .suggest { border: 1px solid rgba(210,250,0,.35); padding: 16px; margin-bottom: 4px; }
+.suggest-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.week-groups { display: flex; gap: 4px; }
+.wg { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.wg.on { background: rgba(210,250,0,.14); border-color: transparent; color: var(--accent); }
 .suggest-name { font-size: 30px; font-weight: 800; color: var(--accent); letter-spacing: -0.02em; line-height: 1.15; margin: 2px 0 2px; }
 .suggest-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
 .btn.ghost-line { background: transparent; border: 1px solid var(--line); }

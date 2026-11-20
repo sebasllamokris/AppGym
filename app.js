@@ -262,11 +262,11 @@ function weekStreakBlock() {
   const today = todayStr(), days = activeDays(), goal = weekGoal();
   const dates = weekDates(mondayOf(new Date()));
   const done = dates.filter((d) => days.has(d)).length;
-  const ws = weekStreak();
+  const ds = streak();
   return `<section class="week">
     <div class="week-head">
-      <h1>Week Streak</h1>
-      <span class="streak-pill" title="Semanas seguidas cumpliendo tu objetivo">🔥 ${ws} ${ws === 1 ? 'semana' : 'semanas'}</span>
+      <h1>Day Streak</h1>
+      <span class="streak-pill" title="Días seguidos entrenando">🔥 ${ds} ${ds === 1 ? 'día' : 'días'}</span>
     </div>
     <div class="muted small">${done} de ${goal} días esta semana${done >= goal ? ' · ¡objetivo cumplido!' : ''}</div>
     <div class="week-days">
@@ -283,26 +283,61 @@ function weekStreakBlock() {
 }
 
 // ---------- Sugerencia del día ----------
-// Rotación según la última rutina: Push → Pull → Piernas → Push…
-const NEXT_ROUTINE = { push: 'pull', pull: 'legs', legs: 'push', upper: 'legs', full: 'full', arms: 'legs', cali: 'cali', plyo: 'upper', core: 'push' };
+// Cada semana (lunes a domingo) hay que completar Push, Pull y Piernas.
+// Cuando están los tres, se sugiere un extra: Full Body, Calistenia o Pliometría.
+const WEEK_CORE = ['push', 'pull', 'legs'];
+const WEEK_EXTRAS = ['full', 'cali', 'plyo'];
+// Qué grupos de la semana cubre cada rutina (Torso = Push + Pull; Full Body no reemplaza a ninguno)
+const COVERS = { push: ['push'], pull: ['pull'], legs: ['legs'], upper: ['push', 'pull'] };
 function greeting() {
   const h = new Date().getHours();
   return h < 5 ? 'Buenas noches' : h < 12 ? 'Buenos días' : h < 20 ? 'Buenas tardes' : 'Buenas noches';
 }
+const routinesOf = (s) => (s.routine === 'combo' ? s.types || [] : [s.routine]);
+function weekPlan() {
+  const from = dateStr(mondayOf(new Date()));
+  const gym = sessionsSorted().filter((s) => s.type === 'gym' && s.routine && s.routine !== 'free'); // de más nueva a más vieja
+  const thisWeek = gym.filter((s) => s.date >= from);
+  const covered = new Set(thisWeek.flatMap((s) => routinesOf(s).flatMap((k) => COVERS[k] || [])));
+  const missing = WEEK_CORE.filter((k) => !covered.has(k));
+  const last = gym[0];
+  const lastKeys = last ? routinesOf(last) : [];
+
+  let next, reason;
+  if (missing.length) {
+    // de lo que falta, seguir el orden Push → Pull → Piernas a partir de la última rutina
+    const lastCore = WEEK_CORE.indexOf(lastKeys.find((k) => WEEK_CORE.includes(k)));
+    const order = WEEK_CORE.map((_, i) => WEEK_CORE[(lastCore + 1 + i) % 3]);
+    next = order.find((k) => missing.includes(k));
+    reason = missing.length === 1 ? 'Es lo último que falta esta semana'
+      : missing.length === 3 && !thisWeek.length ? 'Arrancá la semana'
+      : `Faltan ${missing.length} para completar la semana`;
+  } else {
+    // semana completa: el extra que no hiciste esta semana y que hace más tiempo que no hacés
+    const lastDone = (k) => gym.find((s) => routinesOf(s).includes(k))?.date || '0000';
+    const notThisWeek = WEEK_EXTRAS.filter((k) => !thisWeek.some((s) => routinesOf(s).includes(k)));
+    next = [...(notThisWeek.length ? notThisWeek : WEEK_EXTRAS)].sort((a, b) => lastDone(a).localeCompare(lastDone(b)))[0];
+    reason = '¡Semana completa! Sumá un extra';
+  }
+  return { next, reason, covered, missing, last };
+}
 function suggestionCard() {
   const today = todayStr();
-  const last = sessionsSorted().find((s) => s.type === 'gym' && s.routine && s.routine !== 'free');
-  const lastKey = last ? (last.routine === 'combo' ? last.types?.[last.types.length - 1] : last.routine) : null;
-  const next = (lastKey && NEXT_ROUTINE[lastKey]) || (last ? 'push' : 'full');
+  const { next, reason, covered, last } = weekPlan();
   const r = ROUTINES[next];
   const mins = estimateMinutes(generate(next));
   const doneToday = last && last.date === today;
   const ago = last ? daysBetween(last.date, today) : null;
-  const lastTxt = !last ? 'Ideal para arrancar' : ago === 0 ? `Hoy hiciste ${last.title} ✓` : ago === 1 ? `Último: ${last.title} ayer` : `Último: ${last.title} hace ${ago} días`;
+  const lastTxt = !last ? '' : ago === 0 ? `Hoy hiciste ${last.title} ✓` : ago === 1 ? `Último: ${last.title} ayer` : `Último: ${last.title} hace ${ago} días`;
   return `<div class="card suggest">
-    <div class="muted small">${doneToday ? 'Para la próxima' : 'Hoy te toca'}</div>
+    <div class="suggest-top">
+      <div class="muted small">${doneToday ? 'Para la próxima' : 'Hoy te toca'}</div>
+      <div class="week-groups" aria-label="Grupos de la semana">
+        ${WEEK_CORE.map((k) => `<span class="wg ${covered.has(k) ? 'on' : ''}">${covered.has(k) ? '✓ ' : ''}${esc(ROUTINES[k].name)}</span>`).join('')}
+      </div>
+    </div>
     <div class="suggest-name">${esc(r.name)}</div>
-    <div class="muted small">${esc(lastTxt)} · ~${mins} min</div>
+    <div class="muted small">${esc(reason)}${lastTxt ? ' · ' + esc(lastTxt) : ''} · ~${mins} min</div>
     <div class="suggest-actions">
       <button class="btn primary" data-action="preview" data-r="${next}">Empezar</button>
       <button class="btn ghost-line" data-action="goto-routines">Elegir otra</button>
@@ -547,7 +582,7 @@ function homeView() {
     ${weekStreakBlock()}
     ${suggestionCard()}
     <div class="stats">
-      <div class="stat"><b>${streak()}</b><span>días de racha</span></div>
+      <div class="stat"><b>${weekStreak()}</b><span>semanas con objetivo</span></div>
       <div class="stat"><b>${monthCount()}</b><span>días este mes</span></div>
       <div class="stat"><b>${state.sessions.length}</b><span>sesiones</span></div>
     </div>
