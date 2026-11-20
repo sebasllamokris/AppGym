@@ -1414,15 +1414,25 @@ document.addEventListener('change', async (ev) => {
       const nuevos = data.sessions.filter((s) => s && s.id && s.date && !ids.has(s.id));
       state.sessions.push(...nuevos);
       if (Array.isArray(data.supplements)) {
-        const have = new Set(state.supplements.map((s) => s.id));
-        state.supplements.push(...data.supplements.filter((s) => s && s.id && !have.has(s.id)));
+        const incoming = data.supplements.filter((s) => s && s.id && s.name);
+        const untouched = JSON.stringify(state.supplements) === JSON.stringify(DEFAULT_SUPPS);
+        if (untouched) {
+          state.supplements = incoming; // app recién instalada: tus suplementos reemplazan a los de ejemplo
+        } else {
+          for (const s of incoming) { // los de la copia actualizan nombre, dosis y hora de los que ya existen
+            const i = state.supplements.findIndex((x) => x.id === s.id);
+            if (i >= 0) state.supplements[i] = s; else state.supplements.push(s);
+          }
+        }
       }
+      if (data.settings && typeof data.settings === 'object') state.settings = { ...state.settings, ...data.settings };
       if (!state.membership && data.membership?.lastPaid) state.membership = data.membership;
       if (!state.profile && data.profile?.split) state.profile = data.profile;
       for (const [d, ids] of Object.entries(data.intake || {})) {
         if (Array.isArray(ids)) state.intake[d] = [...new Set([...takenOn(d), ...ids])];
       }
-      save(); render(); toast(`Importadas ${nuevos.length} sesiones`);
+      save(); render(); syncPush(); // el servidor recibe tus suplementos y membresía para los avisos
+      toast(`Importadas ${nuevos.length} sesiones y ${state.supplements.length} suplementos`);
     } catch (e) { toast('Archivo no válido'); }
     t.value = '';
   }
