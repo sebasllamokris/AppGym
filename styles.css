@@ -1,10 +1,10 @@
 :root {
-  --bg: #031322;        /* marino profundo de fondo */
-  --surface: #092742;   /* tarjetas: el azul de la paleta */
-  --surface-2: #0e3256; /* inputs y elementos sobre tarjetas */
-  --line: #1a3f63;
+  --bg: #020b15;        /* casi negro azulado */
+  --surface: #071a2d;   /* tarjetas */
+  --surface-2: #0b2540; /* inputs y elementos sobre tarjetas */
+  --line: #143252;
   --text: #FEFFFA;
-  --muted: #8fa8c0;
+  --muted: #8199b1;
   --accent: #D2FA00;
   --accent-ink: #092742;
   --sport: #4cc9f0;
@@ -302,7 +302,7 @@ textarea.input { min-height: 80px; resize: vertical; }
 .tabs {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
   display: grid; grid-template-columns: repeat(3, 1fr);
-  background: rgba(3,19,34,.94); backdrop-filter: blur(12px); border-top: 1px solid var(--line);
+  background: rgba(2,11,21,.94); backdrop-filter: blur(12px); border-top: 1px solid var(--line);
   padding: 6px 8px calc(6px + var(--safe-b));
 }
 .tabs button { border: 0; background: transparent; color: var(--muted); padding: 6px; font-size: 12px; display: flex; flex-direction: column; align-items: center; gap: 2px; }

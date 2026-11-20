@@ -1,6 +1,6 @@
 // Guarda la app en el celular para que funcione sin internet y muestra los recordatorios.
 // Subí el número de versión cada vez que cambies archivos de la app.
-const CACHE = 'appgym-v11';
+const CACHE = 'appgym-v12';
 const FILES = ['./', 'index.html', 'styles.css', 'app.js', 'data.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
@@ -17,7 +17,8 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET' || new URL(e.request.url).origin !== location.origin) return;
   e.respondWith(
-    fetch(e.request)
+    // no-cache: siempre le pregunta al servidor si hay versión nueva (sin esto iOS usa la copia vieja hasta 10 min)
+    fetch(e.request, { cache: 'no-cache' })
       .then((res) => {
         const copy = res.clone();
         caches.open(CACHE).then((c) => c.put(e.request, copy));
