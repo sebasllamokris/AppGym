@@ -1046,12 +1046,13 @@ function pickerSheet() {
 
 function activitySheet() {
   const a = activityDraft;
+  const match = a.sport === 'Soccer'; // desde la sección Soccer: formulario de partido
   openSheet(`
-    <h2>Registrar actividad</h2>
-    <div class="sub">Deportes, cardio o cualquier movimiento del día</div>
-    <label class="field"><span>¿Qué hiciste?</span>
-      <div class="chips">${SPORTS.map((s) => `<button class="chip ${a.sport === s ? 'on' : ''}" data-action="act-sport" data-v="${esc(s)}">${esc(s)}</button>`).join('')}</div>
-    </label>
+    <h2>${match ? '⚽ Registrar partido' : 'Registrar actividad'}</h2>
+    <div class="sub">${match ? 'Cargá tus goles, asistencias y el torneo' : 'Deportes, cardio o cualquier movimiento del día'}</div>
+    ${match ? '' : `<label class="field"><span>¿Qué hiciste?</span>
+      <div class="chips">${SPORTS.filter((s) => s !== 'Soccer').map((s) => `<button class="chip ${a.sport === s ? 'on' : ''}" data-action="act-sport" data-v="${esc(s)}">${esc(s)}</button>`).join('')}</div>
+    </label>`}
     ${a.sport === 'Otro' ? `<label class="field"><span>Nombre</span><input class="input" id="act-other" value="${esc(a.other)}" placeholder="Ej: escalada"></label>` : ''}
     ${a.sport === 'Soccer' ? `<div class="card fut-form">
       <label class="field"><span>Torneo</span>
