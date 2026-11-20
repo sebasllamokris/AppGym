@@ -183,8 +183,8 @@ export default {
         const ok = await push({
           title: late ? '💳 Membresía del gym vencida' : '💳 Hoy vence tu membresía del gym',
           body: late
-            ? `Venció el ${fmtDay(m.due)} (hace ${late} ${late === 1 ? 'día' : 'días'}). Cuando pagues, tocá "Pagado" en la app.`
-            : 'Cuando pagues, tocá "Pagado" en la app para renovar la fecha.',
+            ? `Venció el ${fmtDay(m.due)} (hace ${late} ${late === 1 ? 'día' : 'días'}). Cuando pagues, tocá "Renovar" en la app.`
+            : 'Cuando pagues, tocá "Renovar" en la app.',
           url: './?membership=1',
           tag: 'appgym-membership',
         });

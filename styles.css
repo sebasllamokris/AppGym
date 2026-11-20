@@ -284,6 +284,13 @@ h3 { font-size: 17px; margin: 0; }
 .mem-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 10px; }
 .mem-date { font-size: 22px; letter-spacing: -0.01em; }
 .mem-pill { font-size: 13px; font-weight: 700; padding: 5px 10px; border-radius: 999px; white-space: nowrap; background: rgba(210,250,0,.12); color: var(--accent); }
+.mem-active {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px; min-height: 46px; padding: 0 16px;
+  border-radius: 12px; background: rgba(210,250,0,.10); border: 1px solid rgba(210,250,0,.35);
+}
+.mem-active span:first-child { color: var(--accent); font-weight: 800; }
+.membership.soon .mem-active { background: rgba(255,190,70,.10); border-color: rgba(255,190,70,.4); }
+.membership.soon .mem-active span:first-child { color: #ffbe46; }
 .membership.soon .mem-pill { background: rgba(255,190,70,.15); color: #ffbe46; }
 .membership.soon .mem-bar span { background: #ffbe46; }
 .membership.due { border-color: rgba(255,107,107,.55); background: linear-gradient(135deg, rgba(255,107,107,.10), var(--surface) 70%); }
