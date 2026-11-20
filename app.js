@@ -23,7 +23,7 @@ let rest = null;          // { until: ms }
 
 // ---------- Guardado ----------
 function load() {
-  const base = { sessions: [], active: null, settings: { rest: 90 }, supplements: DEFAULT_SUPPS, intake: {}, push: { enabled: false }, membership: null };
+  const base = { sessions: [], active: null, settings: { rest: 90 }, supplements: DEFAULT_SUPPS, intake: {}, push: { enabled: false }, membership: null, profile: null };
   try {
     const s = JSON.parse(localStorage.getItem(STORE_KEY));
     if (s && Array.isArray(s.sessions)) return { ...base, ...s };
@@ -74,6 +74,18 @@ function toast(msg, action) {
 }
 
 // ---------- Generador de rutinas ----------
+// ---------- Tu plan de entrenamiento ----------
+const DEFAULT_PROFILE = { goal: 'muscle', level: 'intermediate', split: 'ppl', days: 4, custom: ['push', 'pull', 'legs'], extras: ['full', 'cali', 'plyo'] };
+const profile = () => ({ ...DEFAULT_PROFILE, ...(state.profile || {}) });
+// Rutinas que hay que completar en la semana según el estilo y los días
+function weekRequired() {
+  const p = profile(), s = SPLITS[p.split] || SPLITS.ppl;
+  const list = s.week ? s.week(p.days) : p.custom;
+  return list.length ? list : ['full'];
+}
+// Principiantes: no se arman ejercicios avanzados automáticamente
+const levelOk = (e) => profile().level !== 'beginner' || !ADVANCED.has(e.id);
+
 // Compuestos del pool; en rutinas de gym (sin tag) prefiere los que llevan carga antes que los de calistenia
 function compoundsOf(pool, tag) {
   const comp = pool.filter((e) => e.compound);
@@ -81,7 +93,7 @@ function compoundsOf(pool, tag) {
   return shuffle(!tag && gym.length ? gym : comp);
 }
 function pickFor(muscle, n, exclude, tag) {
-  const pool = EXERCISES.filter((e) => e.muscle === muscle && !exclude.has(e.id) && (!tag || e.tags?.includes(tag)));
+  const pool = EXERCISES.filter((e) => e.muscle === muscle && !exclude.has(e.id) && (!tag || e.tags?.includes(tag)) && levelOk(e));
   const compounds = compoundsOf(pool, tag);
   const out = [];
   if (compounds.length) out.push(compounds[0]); // el primero de cada grupo, multiarticular
@@ -130,7 +142,7 @@ function generateCombo(types) {
     for (const s of ordered) {
       if (got >= quota[t]) break;
       const first = !muscleUses[s.m];
-      const pool = EXERCISES.filter((e) => e.muscle === s.m && !used.has(e.id) && (!s.tag || e.tags?.includes(s.tag)));
+      const pool = EXERCISES.filter((e) => e.muscle === s.m && !used.has(e.id) && (!s.tag || e.tags?.includes(s.tag)) && levelOk(e));
       const comp = compoundsOf(pool, s.tag);
       const ex = first && comp.length ? comp[0] : shuffle(pool)[0];
       if (!ex) continue;
@@ -240,7 +252,7 @@ function monthCount() {
 }
 
 // ---------- Week Streak ----------
-const weekGoal = () => state.settings.weekGoal || 4;
+const weekGoal = () => state.profile?.days || state.settings.weekGoal || 4;
 function mondayOf(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7)); }
 function weekDates(monday) {
   return Array.from({ length: 7 }, (_, i) => dateStr(new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i)));
@@ -283,12 +295,8 @@ function weekStreakBlock() {
 }
 
 // ---------- Sugerencia del día ----------
-// Cada semana (lunes a domingo) hay que completar Push, Pull y Piernas.
-// Cuando están los tres, se sugiere un extra: Full Body, Calistenia o Pliometría.
-const WEEK_CORE = ['push', 'pull', 'legs'];
-const WEEK_EXTRAS = ['full', 'cali', 'plyo'];
-// Qué grupos de la semana cubre cada rutina (Torso = Push + Pull; Full Body no reemplaza a ninguno)
-const COVERS = { push: ['push'], pull: ['pull'], legs: ['legs'], upper: ['push', 'pull'] };
+// Cada semana (lunes a domingo) hay que completar las rutinas de tu plan (Ajustes → Tu plan).
+// Cuando están todas, se sugiere uno de tus extras.
 function greeting() {
   const h = new Date().getHours();
   return h < 5 ? 'Buenas noches' : h < 12 ? 'Buenos días' : h < 20 ? 'Buenas tardes' : 'Buenas noches';
@@ -298,44 +306,52 @@ function weekPlan() {
   const from = dateStr(mondayOf(new Date()));
   const gym = sessionsSorted().filter((s) => s.type === 'gym' && s.routine && s.routine !== 'free'); // de más nueva a más vieja
   const thisWeek = gym.filter((s) => s.date >= from);
-  const covered = new Set(thisWeek.flatMap((s) => routinesOf(s).flatMap((k) => COVERS[k] || [])));
-  const missing = WEEK_CORE.filter((k) => !covered.has(k));
+  const required = weekRequired();
+  const needs = new Set(required);
+
+  // qué cuenta cada sesión de la semana: Torso vale Push + Pull en un plan PPL; Push o Pull valen Torso en un plan Torso/Piernas
+  const credit = {};
+  const add = (k) => { credit[k] = (credit[k] || 0) + 1; };
+  for (const s of thisWeek) for (const k of routinesOf(s)) {
+    if (k === 'upper' && !needs.has('upper') && (needs.has('push') || needs.has('pull'))) { add('push'); add('pull'); }
+    else if ((k === 'push' || k === 'pull') && !needs.has(k) && needs.has('upper')) add('upper');
+    else add(k);
+  }
+  const left = { ...credit }, missing = [];
+  for (const k of required) { if (left[k] > 0) left[k]--; else missing.push(k); }
+
   const last = gym[0];
   const lastKeys = last ? routinesOf(last) : [];
-
   let next, reason;
   if (missing.length) {
-    // de lo que falta, seguir el orden Push → Pull → Piernas a partir de la última rutina
-    const lastCore = WEEK_CORE.indexOf(lastKeys.find((k) => WEEK_CORE.includes(k)));
-    const order = WEEK_CORE.map((_, i) => WEEK_CORE[(lastCore + 1 + i) % 3]);
+    // de lo que falta, seguir el orden del plan a partir de la última rutina hecha
+    const lastIdx = required.indexOf(lastKeys.find((k) => needs.has(k)));
+    const order = required.map((_, i) => required[(lastIdx + 1 + i) % required.length]);
     next = order.find((k) => missing.includes(k));
     reason = missing.length === 1 ? 'Es lo último que falta esta semana'
-      : missing.length === 3 && !thisWeek.length ? 'Arrancá la semana'
+      : !thisWeek.length ? 'Arrancá la semana'
       : `Faltan ${missing.length} para completar la semana`;
   } else {
     // semana completa: el extra que no hiciste esta semana y que hace más tiempo que no hacés
+    let extras = profile().extras.filter((k) => ROUTINES[k] && !needs.has(k));
+    if (!extras.length) extras = ['full', 'cali', 'plyo'].filter((k) => !needs.has(k));
     const lastDone = (k) => gym.find((s) => routinesOf(s).includes(k))?.date || '0000';
-    const notThisWeek = WEEK_EXTRAS.filter((k) => !thisWeek.some((s) => routinesOf(s).includes(k)));
-    next = [...(notThisWeek.length ? notThisWeek : WEEK_EXTRAS)].sort((a, b) => lastDone(a).localeCompare(lastDone(b)))[0];
+    const notThisWeek = extras.filter((k) => !thisWeek.some((s) => routinesOf(s).includes(k)));
+    next = [...(notThisWeek.length ? notThisWeek : extras)].sort((a, b) => lastDone(a).localeCompare(lastDone(b)))[0];
     reason = '¡Semana completa! Sumá un extra';
   }
-  return { next, reason, covered, missing, last };
+  return { next, reason, required, missing, last };
 }
 function suggestionCard() {
   const today = todayStr();
-  const { next, reason, covered, last } = weekPlan();
+  const { next, reason, last } = weekPlan();
   const r = ROUTINES[next];
   const mins = estimateMinutes(generate(next));
   const doneToday = last && last.date === today;
   const ago = last ? daysBetween(last.date, today) : null;
   const lastTxt = !last ? '' : ago === 0 ? `Hoy hiciste ${last.title} ✓` : ago === 1 ? `Último: ${last.title} ayer` : `Último: ${last.title} hace ${ago} días`;
   return `<div class="card suggest">
-    <div class="suggest-top">
-      <div class="muted small">${doneToday ? 'Para la próxima' : 'Hoy te toca'}</div>
-      <div class="week-groups" aria-label="Grupos de la semana">
-        ${WEEK_CORE.map((k) => `<span class="wg ${covered.has(k) ? 'on' : ''}">${covered.has(k) ? '✓ ' : ''}${esc(ROUTINES[k].name)}</span>`).join('')}
-      </div>
-    </div>
+    <div class="muted small">Sugerencia${doneToday ? ' para la próxima' : ''}</div>
     <div class="suggest-name">${esc(r.name)}</div>
     <div class="muted small">${esc(reason)}${lastTxt ? ' · ' + esc(lastTxt) : ''} · ~${mins} min</div>
     <div class="suggest-actions">
@@ -516,6 +532,70 @@ function membershipSheet() {
       <button class="btn primary" data-action="mem-save">Guardar</button>
     </div>
   `);
+}
+
+// ---------- Cuestionario: tu plan de entrenamiento ----------
+let planDraft = null, planStep = 0, planFirstRun = false;
+const PLAN_STEPS = ['Objetivo', 'Nivel', 'Estilo de rutina', 'Tu semana'];
+
+function planSummary(p = profile()) {
+  const req = (SPLITS[p.split]?.week ? SPLITS[p.split].week(p.days) : p.custom).map((k) => ROUTINES[k]?.name).filter(Boolean);
+  return { split: SPLITS[p.split]?.name, week: req.join(' · '), goal: GOALS[p.goal]?.name, level: LEVELS[p.level]?.name };
+}
+function planOption(field, key, name, desc) {
+  const on = planDraft[field] === key;
+  return `<button class="plan-opt ${on ? 'on' : ''}" data-action="plan-pick" data-f="${field}" data-v="${key}">
+    <span class="po-check">${on ? '✓' : ''}</span>
+    <span class="grow"><b>${esc(name)}</b><span class="muted small">${esc(desc)}</span></span>
+  </button>`;
+}
+function planChips(field, keys) {
+  return `<div class="chips">${keys.map((k) => `<button class="chip ${planDraft[field].includes(k) ? 'on' : ''}" data-action="plan-toggle" data-f="${field}" data-v="${k}">${esc(ROUTINES[k].name)}</button>`).join('')}</div>`;
+}
+function planSheet() {
+  const d = planDraft, step = planStep;
+  let body = '';
+  if (step === 0) {
+    body = `<p class="sub">¿Qué querés lograr con tu entrenamiento?</p>
+      ${Object.entries(GOALS).map(([k, g]) => planOption('goal', k, g.name, g.desc)).join('')}`;
+  } else if (step === 1) {
+    body = `<p class="sub">¿Cuánta experiencia tenés entrenando?</p>
+      ${Object.entries(LEVELS).map(([k, l]) => planOption('level', k, l.name, l.desc)).join('')}
+      <p class="muted small">Si sos principiante, no te armamos ejercicios avanzados (muscle-up, pistol, saltos en profundidad…). Igual podés agregarlos a mano.</p>`;
+  } else if (step === 2) {
+    body = `<p class="sub">¿Cómo organizás tu semana?</p>
+      ${Object.entries(SPLITS).map(([k, s]) => planOption('split', k, s.name, s.desc)).join('')}
+      ${d.split === 'custom' ? `<h2 class="section">Rutinas de tu semana</h2>${planChips('custom', COMBINABLE)}` : ''}`;
+  } else {
+    const req = SPLITS[d.split].week ? SPLITS[d.split].week(d.days) : d.custom;
+    const extraKeys = EXTRA_OPTIONS.filter((k) => !req.includes(k));
+    body = `<p class="sub">¿Cuántos días por semana entrenás?</p>
+      <div class="seg days-seg">${[2, 3, 4, 5, 6, 7].map((n) => `<button class="chip ${d.days === n ? 'on' : ''}" data-action="plan-pick" data-f="days" data-v="${n}">${n}</button>`).join('')}</div>
+      <div class="card plan-week">
+        <div class="muted small">Cada semana vas a completar</div>
+        <b>${esc(req.map((k) => ROUTINES[k]?.name).join(' · ') || '—')}</b>
+        ${req.length > d.days ? `<div class="small" style="color:#ffbe46;margin-top:6px">Tu estilo tiene ${req.length} rutinas y elegiste ${d.days} días: vas a necesitar más días o combinar rutinas.</div>` : ''}
+      </div>
+      <h2 class="section">Extras cuando completás la semana</h2>
+      ${planChips('extras', extraKeys)}`;
+  }
+  const last = step === PLAN_STEPS.length - 1;
+  openSheet(`
+    <div class="plan-steps">${PLAN_STEPS.map((s, i) => `<span class="${i <= step ? 'on' : ''}"></span>`).join('')}</div>
+    <div class="muted small">Paso ${step + 1} de ${PLAN_STEPS.length}</div>
+    <h2>${planFirstRun && step === 0 ? 'Armemos tu plan' : esc(PLAN_STEPS[step])}</h2>
+    ${body}
+    <div class="sheet-actions">
+      ${step > 0 ? '<button class="btn" data-action="plan-step" data-dir="-1">Atrás</button>'
+        : `<button class="btn" data-action="${planFirstRun ? 'plan-skip' : 'close-sheet'}">${planFirstRun ? 'Ahora no' : 'Cancelar'}</button>`}
+      <button class="btn primary" data-action="${last ? 'plan-save' : 'plan-step'}" data-dir="1">${last ? 'Guardar plan' : 'Siguiente'}</button>
+    </div>
+  `);
+}
+function openPlan(firstRun = false) {
+  planDraft = JSON.parse(JSON.stringify(profile()));
+  planStep = 0; planFirstRun = firstRun;
+  planSheet();
 }
 
 // Al tocar una notificación se abre la app con ?take=ids (suplementos) o ?membership=1
@@ -753,17 +833,23 @@ function settingsView() {
   const r = state.settings.rest;
   return `
     <header><h1>Ajustes</h1></header>
+    <h2 class="section section-row"><span>Tu plan de entrenamiento</span><button class="link" data-action="plan-open">${state.profile ? 'Editar' : 'Armar'}</button></h2>
+    ${(() => {
+      if (!state.profile) return `<button class="btn ghost wide" data-action="plan-open">+ Armar tu plan (objetivo, nivel, estilo y días)</button>`;
+      const s = planSummary();
+      return `<button class="card plan-card" data-action="plan-open">
+        <div class="plan-row"><span class="muted small">Estilo</span><b>${esc(s.split)}</b></div>
+        <div class="plan-row"><span class="muted small">Tu semana</span><b>${esc(s.week)}</b></div>
+        <div class="plan-row"><span class="muted small">Días</span><b>${state.profile.days} por semana</b></div>
+        <div class="plan-row"><span class="muted small">Objetivo</span><b>${esc(s.goal)}</b></div>
+        <div class="plan-row"><span class="muted small">Nivel</span><b>${esc(s.level)}</b></div>
+      </button>`;
+    })()}
     <h2 class="section">Entrenamiento</h2>
     <div class="card setting-row">
       <span>Descanso entre series</span>
       <select class="input" style="width:auto" data-setting="rest">
         ${[0, 45, 60, 90, 120, 150, 180, 240].map((s) => `<option value="${s}" ${s === r ? 'selected' : ''}>${s ? fmtClock(s * 1000) : 'Sin timer'}</option>`).join('')}
-      </select>
-    </div>
-    <div class="card setting-row">
-      <span>Objetivo semanal<div class="muted small">Para tu Week Streak</div></span>
-      <select class="input" style="width:auto" data-setting="weekGoal">
-        ${[2, 3, 4, 5, 6, 7].map((n) => `<option value="${n}" ${n === weekGoal() ? 'selected' : ''}>${n} días</option>`).join('')}
       </select>
     </div>
     ${pushSection()}
@@ -821,6 +907,8 @@ function openSheet(html) {
 function closeSheet() {
   $('#sheet').hidden = true;
   preview = null; activityDraft = null; pickQuery = ''; openDay = null;
+  if (planFirstRun) { state.profileSkipped = true; planFirstRun = false; save(); } // cerró el cuestionario inicial tocando afuera
+  planDraft = null;
 }
 
 const comboTitle = (types) => types.map((t) => ROUTINES[t].name).join(' + ');
@@ -1105,7 +1193,7 @@ const actions = {
   'swap-ex'(el) {
     const i = +el.dataset.i, cur = state.active.exercises[i];
     const used = new Set(state.active.exercises.map((e) => e.exId));
-    const options = shuffle(EXERCISES.filter((e) => e.muscle === cur.muscle && !used.has(e.id)));
+    const options = shuffle(EXERCISES.filter((e) => e.muscle === cur.muscle && !used.has(e.id) && levelOk(e)));
     if (!options.length) return toast('No hay otro ejercicio para ese músculo');
     state.active.exercises[i] = newWorkoutExercise(options[0]);
     save(); render(); toast(`Cambiado por ${options[0].name}`);
@@ -1168,6 +1256,39 @@ const actions = {
   async 'push-test'() {
     try { await pushPost('/test', { id: state.push.deviceId }); toast('Enviada, debería llegar en segundos'); }
     catch (e) { toast('No se pudo enviar: ' + e.message); }
+  },
+  'plan-open'() { openPlan(false); },
+  'plan-pick'(el) {
+    const f = el.dataset.f;
+    planDraft[f] = f === 'days' ? +el.dataset.v : el.dataset.v;
+    planSheet();
+  },
+  'plan-toggle'(el) {
+    const list = planDraft[el.dataset.f], v = el.dataset.v;
+    if (list.includes(v)) list.splice(list.indexOf(v), 1); else list.push(v);
+    planSheet();
+  },
+  'plan-step'(el) {
+    if (planStep === 2 && +el.dataset.dir > 0 && planDraft.split === 'custom' && !planDraft.custom.length) return toast('Elegí al menos una rutina');
+    planStep = Math.max(0, Math.min(PLAN_STEPS.length - 1, planStep + +el.dataset.dir));
+    planSheet();
+    $('.sheet').scrollTop = 0;
+  },
+  'plan-save'() {
+    const prevGoal = state.profile?.goal;
+    state.profile = planDraft;
+    let msg = '✅ Plan guardado';
+    if (planDraft.goal !== prevGoal) {
+      state.settings.rest = GOALS[planDraft.goal].rest; // descanso sugerido según el objetivo
+      msg += ` · descanso ${fmtClock(state.settings.rest * 1000)}`;
+    }
+    planFirstRun = false;
+    save(); closeSheet(); render(); toast(msg);
+  },
+  'plan-skip'() {
+    state.profileSkipped = true; planFirstRun = false;
+    save(); closeSheet();
+    toast('Podés armar tu plan cuando quieras en Ajustes');
   },
   'goto-routines'() { $('#routines')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); },
   'edit-membership'() { membershipSheet(); },
@@ -1239,7 +1360,7 @@ const actions = {
   'close-sheet'() { closeSheet(); },
 
   export() {
-    const blob = new Blob([JSON.stringify({ app: 'AppGym', version: 1, exported: new Date().toISOString(), sessions: state.sessions, settings: state.settings, supplements: state.supplements, intake: state.intake, membership: state.membership }, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify({ app: 'AppGym', version: 1, exported: new Date().toISOString(), sessions: state.sessions, settings: state.settings, supplements: state.supplements, intake: state.intake, membership: state.membership, profile: state.profile }, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `appgym-backup-${todayStr()}.json`;
@@ -1297,6 +1418,7 @@ document.addEventListener('change', async (ev) => {
         state.supplements.push(...data.supplements.filter((s) => s && s.id && !have.has(s.id)));
       }
       if (!state.membership && data.membership?.lastPaid) state.membership = data.membership;
+      if (!state.profile && data.profile?.split) state.profile = data.profile;
       for (const [d, ids] of Object.entries(data.intake || {})) {
         if (Array.isArray(ids)) state.intake[d] = [...new Set([...takenOn(d), ...ids])];
       }
@@ -1321,6 +1443,8 @@ document.addEventListener('visibilitychange', () => {
 handleTakeLink();
 render();
 syncPush();
+// primera vez: proponer armar el plan
+if (!state.profile && !state.profileSkipped && !state.active) setTimeout(() => openPlan(true), 600);
 
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
   // updateViaCache 'none': el navegador siempre busca sw.js nuevo, sin usar su caché

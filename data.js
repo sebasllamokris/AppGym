@@ -493,12 +493,43 @@ const ROUTINES = {
   upper: { name: 'Torso', desc: 'Todo el tren superior', slots: [['chest', 2], ['back', 2], ['shoulders', 1], ['biceps', 1], ['triceps', 1]] },
   full: { name: 'Full Body', desc: 'Cuerpo completo', slots: [['quads', 1], ['chest', 1], ['back', 1], ['hamstrings', 1], ['shoulders', 1], ['core', 1]] },
   arms: { name: 'Brazos', desc: 'Bíceps, tríceps, antebrazo y hombro', slots: [['biceps', 3], ['triceps', 3], ['forearms', 1], ['shoulders', 1]] },
+  chest: { name: 'Pecho', desc: 'Día de pecho completo', slots: [['chest', 5], ['triceps', 1]] },
+  back: { name: 'Espalda', desc: 'Dorsales, trapecio y lumbar', slots: [['back', 5], ['traps', 1], ['rearDelts', 1]] },
+  shoulders: { name: 'Hombros', desc: 'Deltoides y trapecio', slots: [['shoulders', 4], ['rearDelts', 1], ['traps', 1]] },
   cali: { name: 'Calistenia', desc: 'Solo peso corporal', slots: [['back', 2, 'cali'], ['chest', 1, 'cali'], ['shoulders', 1, 'cali'], ['triceps', 1, 'cali'], ['quads', 1, 'cali'], ['core', 2, 'cali']] },
   plyo: { name: 'Pliometría', desc: 'Saltos y potencia explosiva', slots: [['plyoLower', 4], ['plyoUpper', 2]] },
   core: { name: 'Core', desc: 'Abdomen y zona media', slots: [['core', 4]] },
   free: { name: 'Libre', desc: 'Elegís vos los ejercicios', slots: [] },
   combo: { name: 'Combinación', desc: 'Mezclá 2 o 3 tipos en una sola rutina', slots: [], combo: true },
 };
+
+// ---------- Tu plan de entrenamiento ----------
+// Objetivo: define el descanso sugerido entre series (segundos)
+const GOALS = {
+  muscle: { name: 'Ganar músculo', desc: 'Hipertrofia: 8-12 reps, descanso medio', rest: 90 },
+  strength: { name: 'Ganar fuerza', desc: 'Pesos altos, pocas reps, descanso largo', rest: 180 },
+  fat: { name: 'Perder grasa', desc: 'Ritmo alto, descansos cortos', rest: 60 },
+  performance: { name: 'Rendimiento deportivo', desc: 'Potencia, agilidad y resistencia', rest: 90 },
+  health: { name: 'Salud y bienestar', desc: 'Moverte bien y sentirte mejor', rest: 75 },
+};
+const LEVELS = {
+  beginner: { name: 'Principiante', desc: 'Menos de 6 meses entrenando' },
+  intermediate: { name: 'Intermedio', desc: 'Entre 6 meses y 2 años' },
+  advanced: { name: 'Avanzado', desc: 'Más de 2 años, técnica sólida' },
+};
+// Ejercicios que no se arman automáticamente para principiantes
+const ADVANCED = new Set(['muscle-up', 'hspu', 'pistol', 'ring-dips', 'weighted-pullup', 'hanging-pike', 'depth-jump',
+  'weighted-jump-squat', 'incline-depth-pushup', 'kb-plyo-pushup', 'nordic', 'ghr', 'l-sit']);
+// Estilo de rutina: qué rutinas hay que completar en la semana según los días que entrenás
+const SPLITS = {
+  ppl: { name: 'Push / Pull / Piernas', desc: 'Empuje, tirón y piernas', week: (d) => (d >= 6 ? ['push', 'pull', 'legs', 'push', 'pull', 'legs'] : ['push', 'pull', 'legs']) },
+  ul: { name: 'Torso / Piernas', desc: 'Alternás tren superior e inferior', week: (d) => (d >= 4 ? ['upper', 'legs', 'upper', 'legs'] : ['upper', 'legs']) },
+  full: { name: 'Full Body', desc: 'Cuerpo completo en cada sesión', week: (d) => Array(Math.min(Math.max(d, 2), 3)).fill('full') },
+  bro: { name: 'Un grupo por día', desc: 'Pecho, espalda, piernas, hombros y brazos', week: () => ['chest', 'back', 'legs', 'shoulders', 'arms'] },
+  custom: { name: 'Personalizado', desc: 'Elegís vos las rutinas de tu semana', week: null },
+};
+// Rutinas que se pueden sumar como extra cuando completás la semana
+const EXTRA_OPTIONS = ['full', 'cali', 'plyo', 'core', 'arms'];
 
 // Límites de la Combinación: así queda una sesión de ~50-60 min y no la suma de rutinas completas.
 const COMBO = {
@@ -545,6 +576,9 @@ const WARMUP_PLANS = {
   upper: ['arm-circles', 'band-dislocates', 'band-pull-apart', 'scap-pushup', 'scap-pull'],
   full: ['worlds-greatest', 'arm-circles', 'leg-swings', 'band-pull-apart', 'bw-squat'],
   arms: ['arm-circles', 'wrist', 'band-er', 'pushup-easy'],
+  chest: ['arm-circles', 'band-dislocates', 'band-er', 'scap-pushup', 'pushup-easy'],
+  back: ['cat-cow', 'thoracic-rot', 'band-pull-apart', 'scap-pull', 'arm-circles'],
+  shoulders: ['arm-circles', 'band-dislocates', 'band-er', 'band-pull-apart', 'scap-pushup'],
   cali: ['wrist', 'arm-circles', 'scap-pushup', 'scap-pull', 'bw-squat'],
   plyo: ['leg-swings', 'ankle', 'skipping', 'butt-kicks', 'pogo', 'easy-jumps'],
   core: ['cat-cow', 'bird-dog', 'dead-bug'],
