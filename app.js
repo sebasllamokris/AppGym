@@ -26,9 +26,14 @@ function load() {
   const base = { sessions: [], active: null, settings: { rest: 90 }, supplements: DEFAULT_SUPPS, intake: {}, push: { enabled: false }, membership: null, profile: null };
   try {
     const s = JSON.parse(localStorage.getItem(STORE_KEY));
-    if (s && Array.isArray(s.sessions)) return { ...base, ...s };
+    if (s && Array.isArray(s.sessions)) { migrate(s.sessions); return { ...base, ...s }; }
   } catch (e) { /* datos dañados o sin acceso */ }
   return base;
+}
+// Ajustes de datos viejos: los partidos de "Fútbol" ahora se llaman "Soccer"
+function migrate(sessions) {
+  for (const s of sessions) if (s && s.sport === 'Fútbol') s.sport = 'Soccer';
+  return sessions;
 }
 function save() {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
@@ -534,10 +539,10 @@ function membershipSheet() {
   `);
 }
 
-// ---------- Fútbol: goles, asistencias y torneos ----------
+// ---------- Soccer: goles, asistencias y torneos ----------
 let futFilter = 'Todos';
 // Solo cuentan los partidos cargados con estadísticas (tienen torneo)
-const futMatches = (t = 'Todos') => sessionsSorted().filter((s) => s.type === 'activity' && s.sport === 'Fútbol' && s.tournament && (t === 'Todos' || s.tournament === t));
+const futMatches = (t = 'Todos') => sessionsSorted().filter((s) => s.type === 'activity' && s.sport === 'Soccer' && s.tournament && (t === 'Todos' || s.tournament === t));
 function futTotals(list) {
   const g = list.reduce((n, s) => n + (s.goals || 0), 0), a = list.reduce((n, s) => n + (s.assists || 0), 0);
   return { pj: list.length, g, a, ga: g + a };
@@ -546,7 +551,7 @@ const avg = (n, d) => (d ? (n / d).toFixed(2).replace(/\.?0+$/, '') : '0');
 
 function futCard() {
   const t = futTotals(futMatches());
-  if (!t.pj) return `<button class="btn ghost wide fut-empty" data-action="log-activity" data-sport="Fútbol">⚽ Registrá tu primer partido para ver tus stats</button>`;
+  if (!t.pj) return `<button class="btn ghost wide fut-empty" data-action="log-activity" data-sport="Soccer">⚽ Registrá tu primer partido para ver tus stats</button>`;
   return `<div class="card fut-card">
     <div class="fut-head"><b>⚽ Mis stats</b><span class="muted small">${t.pj} ${t.pj === 1 ? 'partido' : 'partidos'}</span></div>
     <div class="fut-nums">
@@ -556,7 +561,7 @@ function futCard() {
     </div>
     <div class="suggest-actions">
       <button class="btn" data-action="fut-stats">Ver stats</button>
-      <button class="btn sport" data-action="log-activity" data-sport="Fútbol">+ Partido</button>
+      <button class="btn sport" data-action="log-activity" data-sport="Soccer">+ Partido</button>
     </div>
   </div>`;
 }
@@ -569,7 +574,7 @@ function futStatsSheet() {
   const best = [...list].sort((a, b) => ((b.goals || 0) + (b.assists || 0)) - ((a.goals || 0) + (a.assists || 0)) || b.goals - a.goals)[0];
   const byTour = TOURNAMENTS.map((k) => ({ k, ...futTotals(futMatches(k)) })).filter((r) => r.pj);
   openSheet(`
-    <h2>⚽ Mis stats de fútbol</h2>
+    <h2>⚽ Mis stats de soccer</h2>
     <div class="chips fut-filter">${['Todos', ...TOURNAMENTS].map((k) => `<button class="chip ${futFilter === k ? 'on' : ''}" data-action="fut-filter" data-v="${k}">${k}</button>`).join('')}</div>
     ${!t.pj ? `<div class="empty">Todavía no hay partidos${futFilter === 'Todos' ? '' : ' en ' + esc(futFilter)}.</div>` : `
     <div class="fut-grid">
@@ -598,7 +603,7 @@ function futStatsSheet() {
     </div>`}
     <div class="sheet-actions">
       <button class="btn" data-action="close-sheet">Cerrar</button>
-      <button class="btn sport" data-action="log-activity" data-sport="Fútbol">+ Partido</button>
+      <button class="btn sport" data-action="log-activity" data-sport="Soccer">+ Partido</button>
     </div>
   `);
 }
@@ -687,7 +692,7 @@ function handleTakeLink() {
 
 function sessionSummary(s) {
   if (s.type === 'activity') {
-    const fut = s.sport === 'Fútbol' && s.tournament ? [`⚽ ${s.goals || 0} G`, `🅰️ ${s.assists || 0} A`, s.tournament] : [];
+    const fut = s.sport === 'Soccer' && s.tournament ? [`⚽ ${s.goals || 0} G`, `🅰️ ${s.assists || 0} A`, s.tournament] : [];
     return [...fut, s.minutes ? `${s.minutes} min` : '', !fut.length && s.intensity ? `intensidad ${s.intensity}` : ''].filter(Boolean).join(' · ');
   }
   const sets = s.exercises.reduce((a, e) => a + e.sets.length, 0);
@@ -751,7 +756,7 @@ function homeView() {
     <div class="home-actions">
       <button class="btn sport wide" data-action="log-activity">+ Registrar deporte o actividad</button>
     </div>
-    <h2 class="section">Fútbol</h2>
+    <h2 class="section">Soccer</h2>
     ${futCard()}
     <h2 class="section">Últimas sesiones</h2>
     ${recent.length ? recent.map(sessionRow).join('') : '<div class="empty">Todavía no registraste nada. ¡Elegí una rutina y arrancá!</div>'}
@@ -1036,7 +1041,7 @@ function activitySheet() {
       <div class="chips">${SPORTS.map((s) => `<button class="chip ${a.sport === s ? 'on' : ''}" data-action="act-sport" data-v="${esc(s)}">${esc(s)}</button>`).join('')}</div>
     </label>
     ${a.sport === 'Otro' ? `<label class="field"><span>Nombre</span><input class="input" id="act-other" value="${esc(a.other)}" placeholder="Ej: escalada"></label>` : ''}
-    ${a.sport === 'Fútbol' ? `<div class="card fut-form">
+    ${a.sport === 'Soccer' ? `<div class="card fut-form">
       <label class="field"><span>Torneo</span>
         <div class="seg fut-tour">${TOURNAMENTS.map((t) => `<button class="chip ${a.tournament === t ? 'on' : ''}" data-action="act-tour" data-v="${t}">${t}</button>`).join('')}</div>
       </label>
@@ -1326,10 +1331,10 @@ const actions = {
     const sport = a.sport === 'Otro' ? (a.other.trim() || 'Otra actividad') : a.sport;
     if (!sport) return toast('Elegí qué actividad hiciste');
     const entry = { id: uid(), type: 'activity', date: a.date, start: Date.now(), sport, minutes: num(a.minutes) || '', intensity: a.intensity, notes: a.notes.trim() };
-    if (sport === 'Fútbol') Object.assign(entry, { goals: a.goals, assists: a.assists, tournament: a.tournament });
+    if (sport === 'Soccer') Object.assign(entry, { goals: a.goals, assists: a.assists, tournament: a.tournament });
     state.sessions.push(entry);
     save(); closeSheet(); render();
-    toast(sport === 'Fútbol' && (a.goals || a.assists) ? `⚽ Partido guardado · ${a.goals} G · ${a.assists} A` : '⚡ Actividad registrada');
+    toast(sport === 'Soccer' && (a.goals || a.assists) ? `⚽ Partido guardado · ${a.goals} G · ${a.assists} A` : '⚡ Actividad registrada');
   },
   'fut-stats'() { futFilter = 'Todos'; futStatsSheet(); },
   'fut-filter'(el) { futFilter = el.dataset.v; futStatsSheet(); },
@@ -1509,7 +1514,7 @@ document.addEventListener('change', async (ev) => {
       const data = JSON.parse(await t.files[0].text());
       if (!Array.isArray(data.sessions)) throw new Error();
       const ids = new Set(state.sessions.map((s) => s.id));
-      const nuevos = data.sessions.filter((s) => s && s.id && s.date && !ids.has(s.id));
+      const nuevos = migrate(data.sessions.filter((s) => s && s.id && s.date && !ids.has(s.id)));
       state.sessions.push(...nuevos);
       if (Array.isArray(data.supplements)) {
         const incoming = data.supplements.filter((s) => s && s.id && s.name);
