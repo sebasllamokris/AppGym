@@ -21,9 +21,18 @@
   <div id="rest" class="rest" hidden></div>
 
   <nav id="tabs" class="tabs">
-    <button data-view="home"><span class="ti">🏠</span>Inicio</button>
-    <button data-view="calendar"><span class="ti">📅</span>Calendario</button>
-    <button data-view="settings"><span class="ti">⚙️</span>Ajustes</button>
+    <button data-view="home" aria-label="Inicio">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h5v-6h4v6h5V9.5"/></svg>
+      <span>Inicio</span>
+    </button>
+    <button data-view="calendar" aria-label="Calendario">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>
+      <span>Calendario</span>
+    </button>
+    <button data-view="settings" aria-label="Ajustes">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>
+      <span>Ajustes</span>
+    </button>
   </nav>
 
   <div id="sheet" class="sheet-wrap" hidden>
